@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	handlerKey         = "github.com/linlanniao/k8sutils/ResourceHandler"
+	handlerKey         = "handler.k8sutils.ppops.cn"
 	resyncPeriod       = 2 * time.Minute
 	defaultWorkers int = 3
 )
@@ -24,37 +24,37 @@ const (
 type OnAddedUpdatedFunc func(key string, obj any) error
 type OnDeletedFunc func(key string) error
 
-type ResourceHandler struct {
-	name                  string
-	resource              string
-	kind                  runtime.Object
-	indexer               cache.Indexer
-	queue                 workqueue.RateLimitingInterface
-	informer              cache.Controller
-	restClient            rest.Interface
-	workers               int
-	addedUpdatedFunctions []OnAddedUpdatedFunc
-	deletedFunctions      []OnDeletedFunc
+type Handler struct {
+	name                string
+	resource            string
+	kind                runtime.Object
+	indexer             cache.Indexer
+	queue               workqueue.RateLimitingInterface
+	informer            cache.Controller
+	restClient          rest.Interface
+	workers             int
+	onAddedUpdatedFuncs []OnAddedUpdatedFunc
+	onDeletedFuncs      []OnDeletedFunc
 }
 
-// NewResourceHandler creates a new ResourceHandler.
-func NewResourceHandler(
+// NewHandler creates a new Handler.
+func NewHandler(
 	name string,
 	resource string,
 	kind runtime.Object,
 	restClient rest.Interface,
 	workers int,
-	addedUpdatedFunctions []OnAddedUpdatedFunc,
-	deletedFunctions []OnDeletedFunc,
-
-) *ResourceHandler {
-	clientset, err := k8sutils.GetK8sClient()
+	onAddedUpdatedFuncs []OnAddedUpdatedFunc,
+	onDeletedFuncs []OnDeletedFunc,
+) *Handler {
+	clientset, err := k8sutils.GetClientset()
 	if err != nil {
 		panic(err.Error())
 	}
 
 	optionsModifier := func(options *metav1.ListOptions) {
-		options.LabelSelector = handlerKey + "=" + resource // only watch preplan jobs
+		s := fmt.Sprintf("%s/%s=%s", handlerKey, resource, name)
+		options.LabelSelector = s
 	}
 
 	listWatcher := cache.NewFilteredListWatchFromClient(restClient, resource, clientset.GetNamespace(), optionsModifier)
@@ -88,21 +88,21 @@ func NewResourceHandler(
 		workers = defaultWorkers
 	}
 
-	return &ResourceHandler{
-		name:                  name,
-		resource:              resource,
-		kind:                  kind,
-		indexer:               indexer,
-		queue:                 queue,
-		informer:              informer,
-		restClient:            restClient,
-		workers:               workers,
-		addedUpdatedFunctions: addedUpdatedFunctions,
-		deletedFunctions:      deletedFunctions,
+	return &Handler{
+		name:                name,
+		resource:            resource,
+		kind:                kind,
+		indexer:             indexer,
+		queue:               queue,
+		informer:            informer,
+		restClient:          restClient,
+		workers:             workers,
+		onAddedUpdatedFuncs: onAddedUpdatedFuncs,
+		onDeletedFuncs:      onDeletedFuncs,
 	}
 }
 
-func (h *ResourceHandler) processNextItem() bool {
+func (h *Handler) processNextItem() bool {
 	// Wait until there is a new item in the working queue
 	key, quit := h.queue.Get()
 	if quit {
@@ -123,7 +123,7 @@ func (h *ResourceHandler) processNextItem() bool {
 // process is the business logic of the handler. In this handler it simply prints
 // information about the pod to stdout. In case an error happened, it has to simply return the error.
 // The retry logic should not be part of the business logic.
-func (h *ResourceHandler) processBusiness(key string) error {
+func (h *Handler) processBusiness(key string) error {
 	obj, exists, err := h.indexer.GetByKey(key)
 	if err != nil {
 		klog.Errorf("fetching object with key %s from store failed with %v", key, err)
@@ -133,11 +133,11 @@ func (h *ResourceHandler) processBusiness(key string) error {
 	if !exists {
 		// Below we will warm up our cache with a Obj, so that we will see a delete for one Obj
 		klog.Infof("deleting object: %s", key)
-		if len(h.deletedFunctions) == 0 {
-			klog.Infof("deletedFunctions is empty, skip.")
+		if len(h.onDeletedFuncs) == 0 {
+			klog.Infof("onDeletedFuncs is empty, skip.")
 			return nil
 		}
-		for _, fn := range h.deletedFunctions {
+		for _, fn := range h.onDeletedFuncs {
 			if err := fn(key); err != nil {
 				return err
 			}
@@ -147,10 +147,10 @@ func (h *ResourceHandler) processBusiness(key string) error {
 		// Note that you also have to check the uid if you have a local controlled resource, which
 		// is dependent on the actual instance, to detect that a Pod was recreated with the same name
 		klog.Infof("sync/add/update for object: %s", key)
-		if len(h.addedUpdatedFunctions) == 0 {
-			klog.Info("addedUpdatedFunctions is empty, skip.")
+		if len(h.onAddedUpdatedFuncs) == 0 {
+			klog.Info("onAddedUpdatedFuncs is empty, skip.")
 		}
-		for _, fn := range h.addedUpdatedFunctions {
+		for _, fn := range h.onAddedUpdatedFuncs {
 			if err := fn(key, obj); err != nil {
 				return err
 			}
@@ -160,7 +160,7 @@ func (h *ResourceHandler) processBusiness(key string) error {
 }
 
 // handleErr checks if an error happened and makes sure we will retry later.
-func (h *ResourceHandler) handleErr(err error, key interface{}) {
+func (h *Handler) handleErr(err error, key interface{}) {
 	if err == nil {
 		// Forget about the #AddRateLimited history of the key on every successful synchronization.
 		// This ensures that future processing of updates for this key is not delayed because of
@@ -185,18 +185,18 @@ func (h *ResourceHandler) handleErr(err error, key interface{}) {
 	klog.Infof("dropping obj %q out of the queue: %v", key, err)
 }
 
-func (h *ResourceHandler) runWorker() {
+func (h *Handler) runWorker() {
 	for h.processNextItem() {
 	}
 }
 
 // Run begins watching and syncing.
-func (h *ResourceHandler) Run(stopCh chan struct{}) {
+func (h *Handler) Run(stopCh chan struct{}) {
 	defer utilruntime.HandleCrash()
 
 	// Let the workers stop when we are done
 	defer h.queue.ShutDown()
-	klog.Infof("starting %s handler, workers: %d", h.name, h.workers)
+	klog.Infof("starting handler, name=%s, resource=%s, workers=%d", h.name, h.resource, h.workers)
 
 	go h.informer.Run(stopCh)
 

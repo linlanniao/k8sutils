@@ -7,15 +7,15 @@ import (
 )
 
 type Controller struct {
-	resourceHandlers []ResourceHandler
+	Handlers []*Handler
 }
 
 func NewController() *Controller {
 	return &Controller{}
 }
 
-func (c *Controller) AddResourceHandler(handler ResourceHandler) {
-	c.resourceHandlers = append(c.resourceHandlers, handler)
+func (c *Controller) AddHandler(handler *Handler) {
+	c.Handlers = append(c.Handlers, handler)
 }
 
 func (c *Controller) Start(ctx context.Context) error {
@@ -24,7 +24,7 @@ func (c *Controller) Start(ctx context.Context) error {
 	// start the controller
 	stop := make(chan struct{})
 	defer close(stop)
-	for _, h := range c.resourceHandlers {
+	for _, h := range c.Handlers {
 		h := h
 		go h.Run(stop)
 	}

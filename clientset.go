@@ -29,7 +29,7 @@ func NewClientSet() (*kubernetes.Clientset, error) {
 		if p := os.Getenv(clientcmd.RecommendedConfigPathEnvVar); len(p) > 0 {
 			configPath = p
 		} else {
-			p = clientcmd.RecommendedHomeFile
+			configPath = clientcmd.RecommendedHomeFile
 		}
 		config, err = clientcmd.BuildConfigFromFlags("", configPath)
 	}
