@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/linlanniao/k8sutils/common"
 	"github.com/stretchr/testify/assert"
 	rbacv1 "k8s.io/api/rbac/v1"
 )
@@ -58,7 +59,7 @@ func TestClient_CreateJobWithRbac(t *testing.T) {
 
 	// create job
 	job := TestJobSchema
-	job.Name = "rcadm-preplan-123-" + RandLowerStr(4)
+	job.Name = "rcadm-preplan-123-" + common.RandLowerStr(4)
 	job.Namespace = GetClientset().GetNamespace()
 
 	// set init container

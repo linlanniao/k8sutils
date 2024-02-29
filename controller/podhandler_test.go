@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/linlanniao/k8sutils"
+	"github.com/linlanniao/k8sutils/common"
 	"github.com/linlanniao/k8sutils/controller"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -18,7 +19,7 @@ func createPod() (string, error) {
 	// ...
 
 	k8sutils.GetClientset()
-	name := "testpod-" + k8sutils.RandLowerStr(5)
+	name := "testpod-" + common.RandLowerStr(5)
 	ns := "default"
 	var pod = &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{

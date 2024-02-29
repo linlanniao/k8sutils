@@ -1,4 +1,4 @@
-package k8sutils
+package common
 
 import "math/rand/v2"
 

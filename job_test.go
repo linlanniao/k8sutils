@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/linlanniao/k8sutils/common"
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/sync/errgroup"
 
@@ -262,7 +263,7 @@ func createJob() (namespace, podName, jobName string, err error) {
 	ActiveDeadlineSeconds := int64(900)
 	jobTmpl := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "t-" + RandLowerStr(5),
+			Name:      "t-" + common.RandLowerStr(5),
 			Namespace: "default",
 		},
 		Spec: batchv1.JobSpec{
@@ -308,7 +309,7 @@ func TestClient_GetPods(t *testing.T) {
 	JobPodTTLSecondsAfterFinished = int32(1800)
 	jobTmpl := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "t-" + RandLowerStr(5),
+			Name:      "t-" + common.RandLowerStr(5),
 			Namespace: "default",
 		},
 		Spec: batchv1.JobSpec{
@@ -381,13 +382,13 @@ func TestClient_CreateDeleteJob(t *testing.T) {
 		name string
 	}{
 		{
-			name: "j1" + RandLowerStr(5),
+			name: "j1" + common.RandLowerStr(5),
 		}, {
-			name: "j2" + RandLowerStr(5),
+			name: "j2" + common.RandLowerStr(5),
 		}, {
-			name: "j3" + RandLowerStr(5),
+			name: "j3" + common.RandLowerStr(5),
 		}, {
-			name: "j4" + RandLowerStr(5),
+			name: "j4" + common.RandLowerStr(5),
 		},
 	}
 
@@ -489,7 +490,7 @@ func TestClient_TailLogs(t *testing.T) {
 
 func TestCreateJobWithSchema(t *testing.T) {
 	jobTmpl := &TestJobSchema
-	jobTmpl.ObjectMeta.Name = "j1" + RandLowerStr(5)
+	jobTmpl.ObjectMeta.Name = "j1" + common.RandLowerStr(5)
 	jobTmpl.ObjectMeta.Namespace = "default"
 	job, err := GetClientset().CreateJob(testCtx, jobTmpl.ObjectMeta.Namespace, jobTmpl)
 	assert.NoError(t, err)
@@ -498,7 +499,7 @@ func TestCreateJobWithSchema(t *testing.T) {
 
 func TestClient_CreateJob2(t *testing.T) {
 	job := TestJobSchema
-	job.Name = "rcadm-preplan-123-" + RandLowerStr(4)
+	job.Name = "rcadm-preplan-123-" + common.RandLowerStr(4)
 	job.Namespace = GetClientset().GetNamespace()
 
 	var executor string
@@ -554,7 +555,7 @@ func TestClient_GetJobStatus(t *testing.T) {
 
 func TestClient_CreateNSenterJob(t *testing.T) {
 	jobTmpl := &TestJobSchemaNsenter
-	jobTmpl.ObjectMeta.Name = "j1" + RandLowerStr(5)
+	jobTmpl.ObjectMeta.Name = "j1" + common.RandLowerStr(5)
 	jobTmpl.ObjectMeta.Namespace = "default"
 
 	JobInitNsenterContainerCommand := []string{
@@ -578,7 +579,7 @@ func TestClient_CreateNSenterJob(t *testing.T) {
 
 func TestClient_CreateJobWithNodeAffinity(t *testing.T) {
 	jobTmpl := &TestJobSchemaNsenter
-	jobTmpl.ObjectMeta.Name = "j1" + RandLowerStr(5)
+	jobTmpl.ObjectMeta.Name = "j1" + common.RandLowerStr(5)
 	jobTmpl.ObjectMeta.Namespace = "default"
 
 	runCmd := []string{
@@ -657,7 +658,7 @@ test -f %s && curl -XPUT -H 'Content-Type: application/json' %s -d @%s >/dev/nul
 
 	jobTmpl := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "t-" + RandLowerStr(5),
+			Name:      "t-" + common.RandLowerStr(5),
 			Namespace: "default",
 		},
 		Spec: batchv1.JobSpec{

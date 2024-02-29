@@ -5,13 +5,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/linlanniao/k8sutils/common"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestCreateDeletePod(t *testing.T) {
-	namePrefix := "testpod-" + RandLowerStr(4)
+	namePrefix := "testpod-" + common.RandLowerStr(4)
 	ns := "default"
 	tmpl := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
