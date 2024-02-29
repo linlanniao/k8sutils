@@ -17,6 +17,7 @@ func createPod() (string, error) {
 	// 创建一个Pod对象
 	// ...
 
+	k8sutils.GetClientset()
 	name := "testpod-" + k8sutils.RandLowerStr(5)
 	ns := "default"
 	var pod = &corev1.Pod{
@@ -36,7 +37,7 @@ func createPod() (string, error) {
 			},
 		},
 	}
-	clientset, _ := k8sutils.GetClientset()
+	clientset := k8sutils.GetClientset()
 	p, err := clientset.GetClientSet().CoreV1().Pods(ns).Create(context.TODO(), pod, metav1.CreateOptions{})
 	if err != nil {
 		return p.GetName(), err
@@ -45,8 +46,7 @@ func createPod() (string, error) {
 }
 
 func deletePod(name string) error {
-	c, _ := k8sutils.GetClientset()
-	return c.GetClientSet().CoreV1().Pods("default").Delete(context.Background(), name, metav1.DeleteOptions{})
+	return k8sutils.GetClientset().GetClientSet().CoreV1().Pods("default").Delete(context.Background(), name, metav1.DeleteOptions{})
 }
 
 func TestCreatePod(t *testing.T) {
@@ -67,6 +67,7 @@ func TestNewPodHandler(t *testing.T) {
 	}
 	h := controller.NewPodHandler(
 		"banana",
+		"default",
 		4,
 		[]controller.OnAddedUpdatedFunc{addedUpdateFunc},
 		[]controller.OnDeletedFunc{deletedFunc},

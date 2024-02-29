@@ -41,16 +41,14 @@ type Handler struct {
 func NewHandler(
 	name string,
 	resource string,
+	namespace string,
 	kind runtime.Object,
 	restClient rest.Interface,
 	workers int,
 	onAddedUpdatedFuncs []OnAddedUpdatedFunc,
 	onDeletedFuncs []OnDeletedFunc,
 ) *Handler {
-	clientset, err := k8sutils.GetClientset()
-	if err != nil {
-		panic(err.Error())
-	}
+	clientset := k8sutils.GetClientset()
 
 	optionsModifier := func(options *metav1.ListOptions) {
 		s := fmt.Sprintf("%s/%s=%s", handlerKey, resource, name)

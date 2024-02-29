@@ -5,10 +5,12 @@ import (
 	"os"
 	"sync"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/version"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/klog/v2"
 )
 
 type Clientset struct {
@@ -17,7 +19,7 @@ type Clientset struct {
 
 var (
 	cli              *Clientset
-	once             sync.Once
+	initClientset    sync.Once
 	serverVersion    *version.Info
 	currentNamespace string
 )
@@ -41,13 +43,20 @@ func NewClientSet() (*kubernetes.Clientset, error) {
 	return kubernetes.NewForConfig(config)
 }
 
-func GetClientset() (*Clientset, error) {
-	once.Do(func() {
+func GetClientset() *Clientset {
+	initClientset.Do(func() {
 		var (
 			err       error
 			clientset *kubernetes.Clientset
 		)
 		cli = &Clientset{}
+
+		defer func() {
+			if err != nil {
+				klog.Error(err.Error())
+				panic(err.Error())
+			}
+		}()
 
 		clientset, err = NewClientSet()
 		if err != nil {
@@ -64,25 +73,24 @@ func GetClientset() (*Clientset, error) {
 		}
 
 		// try to read current namespace
-		if b, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err != nil {
-			currentNamespace = "default" // if error , set currentNamespace -> default
-			fmt.Println("default namespace")
+		if b, err2 := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err2 != nil {
+			currentNamespace = corev1.NamespaceDefault // if error , set currentNamespace -> default
 		} else {
 			currentNamespace = string(b)
 		}
 	})
 
-	return cli, nil
+	return cli
 }
 
-func (kc *Clientset) GetServerVersion() (string, error) {
+func (c *Clientset) GetServerVersion() (string, error) {
 	if serverVersion != nil {
 		v := serverVersion
 		_ = v
 		return serverVersion.String(), nil
 	}
 
-	v, err := kc.clientset.Discovery().ServerVersion()
+	v, err := c.clientset.Discovery().ServerVersion()
 	if err != nil {
 		return "", err
 	}
@@ -90,10 +98,10 @@ func (kc *Clientset) GetServerVersion() (string, error) {
 	return serverVersion.String(), nil
 }
 
-func (kc *Clientset) GetNamespace() string {
+func (c *Clientset) GetNamespace() string {
 	return currentNamespace
 }
 
-func (kc *Clientset) GetClientSet() *kubernetes.Clientset {
-	return kc.clientset
+func (c *Clientset) GetClientSet() *kubernetes.Clientset {
+	return c.clientset
 }
