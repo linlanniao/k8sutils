@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/linlanniao/k8sutils"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -48,14 +47,13 @@ func NewHandler(
 	onAddedUpdatedFuncs []OnAddedUpdatedFunc,
 	onDeletedFuncs []OnDeletedFunc,
 ) *Handler {
-	clientset := k8sutils.GetClientset()
 
 	optionsModifier := func(options *metav1.ListOptions) {
 		s := fmt.Sprintf("%s/%s=%s", handlerKey, resource, name)
 		options.LabelSelector = s
 	}
 
-	listWatcher := cache.NewFilteredListWatchFromClient(restClient, resource, clientset.GetNamespace(), optionsModifier)
+	listWatcher := cache.NewFilteredListWatchFromClient(restClient, resource, namespace, optionsModifier)
 
 	queue := workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
 
