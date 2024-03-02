@@ -26,7 +26,7 @@ func createPod() (string, error) {
 			Name:      name,
 			Namespace: ns,
 			Labels: map[string]string{
-				"handler.k8sutils.ppops.cn/pods": "banana",
+				"handler.k8sutils.ppops.cn/pod": "banana",
 			},
 		},
 		Spec: corev1.PodSpec{
