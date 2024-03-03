@@ -3,6 +3,7 @@ package template
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -10,11 +11,6 @@ import (
 )
 
 const (
-	podDefaultNamespace = corev1.NamespaceDefault
-
-	podBaseLabelKey = "batch.k8sutils.ppops.cn/pod"
-	podBaseLabelVal = "alpha1v1"
-
 	podSharedVolumeName      = "shared-volume"
 	podSharedVolumeMountPath = "/workdir"
 	podWorkDir               = "/workdir"
@@ -22,11 +18,12 @@ const (
 	podRequestMemory         = "100Mi"
 	podLimitCPU              = "2000m"
 	podLimitMemory           = "2000Mi"
-	//podRunnerContainerImage  = "busybox:1.28.4"
 
 	podContainerNormalName  = "runner"
 	podContainerNsenterName = "runner-nsenter"
 	scriptContentMountPath  = "/tmp"
+
+	podEnvFromSecretOptional bool = true
 )
 
 type scriptExecutor string
@@ -59,12 +56,13 @@ func (p *PodTemplate) initPod() *PodTemplate {
 		return p
 	}
 
-	p.pod = &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:         p.name,
-			Namespace:    p.namespace,
-			GenerateName: p.namePrefix,
-		},
+	p.pod = &corev1.Pod{}
+
+	// set meta
+	p.pod.ObjectMeta = metav1.ObjectMeta{
+		Name:         p.name,
+		Namespace:    p.namespace,
+		GenerateName: p.namePrefix,
 	}
 
 	// init pod spec
@@ -190,6 +188,26 @@ func (p *PodTemplate) initPod() *PodTemplate {
 		}
 	}
 
+	return p
+
+}
+
+func (p *PodTemplate) Pod() *corev1.Pod {
+	return p.pod
+}
+
+func (p *PodTemplate) SetDefaultNamespaceIfEmpty() *PodTemplate {
+	if len(p.namespace) == 0 {
+		p.namespace = corev1.NamespaceDefault
+	}
+	return p
+}
+
+func (p *PodTemplate) setScriptExecutor(executor scriptExecutor) *PodTemplate {
+	p.initPod()
+
+	p.scriptExecutor = executor
+
 	// init script executor
 	if !p.isPrivileged {
 		switch e := p.scriptExecutor; e {
@@ -207,29 +225,20 @@ func (p *PodTemplate) initPod() *PodTemplate {
 	}
 
 	return p
-
 }
 
-func (p *PodTemplate) Pod() *corev1.Pod {
-	return p.pod
-}
-
-func (p *PodTemplate) SetDefaultNamespaceIfEmpty() *PodTemplate {
-	if len(p.namespace) == 0 {
-		p.namespace = corev1.NamespaceDefault
-	}
-	return p
-}
-
-func (p *PodTemplate) SetScriptMount(scriptConfigMap *corev1.ConfigMap, dataKey string) *PodTemplate {
+// SetScript sets the script configmap and data key
+func (p *PodTemplate) SetScript(configMapRef *corev1.ConfigMap, dataKey string, executor scriptExecutor) *PodTemplate {
 	p.initPod()
+
+	p.setScriptExecutor(executor)
 
 	if p.pod.Spec.Volumes == nil {
 		p.pod.Spec.Volumes = []corev1.Volume{}
 	}
 
 	// upsert to PodTemplate
-	p.scriptConfigMap = scriptConfigMap
+	p.scriptConfigMap = configMapRef
 	p.configMapDataKey = dataKey
 
 	const volumeName = "script-volume"
@@ -303,22 +312,116 @@ func (p *PodTemplate) SetScriptMount(scriptConfigMap *corev1.ConfigMap, dataKey 
 	return p
 }
 
-// TODO
+// NewPodTemplate Create PodTemplate
 func NewPodTemplate(
 	namespace string,
 	name string,
 	isPrivileged bool,
-	executor string,
-	scriptContentConfigMap *corev1.ConfigMap,
 	image string,
 
 ) *PodTemplate {
-	tmpl := new(PodTemplate)
-	tmpl.initPod()
+	t := &PodTemplate{
+		namespace:    namespace,
+		name:         name,
+		isPrivileged: isPrivileged,
+		image:        image,
+	}
 
-	p.SetName(name)
-	p.SetNamespace(namespace)
+	t.initPod()
 
-	// todo
-	return nil
+	return t
+}
+
+// SetGlobalConfigSecretName Set the global configuration of SecretName
+func (p *PodTemplate) SetGlobalConfigSecretName(name string) *PodTemplate {
+	p.initPod()
+
+	secretOptional := podEnvFromSecretOptional
+	c0 := p.pod.Spec.Containers[0]
+	if c0.EnvFrom == nil {
+		c0.EnvFrom = []corev1.EnvFromSource{}
+	}
+	c0.EnvFrom = append(c0.EnvFrom, corev1.EnvFromSource{
+		SecretRef: &corev1.SecretEnvSource{
+			LocalObjectReference: corev1.LocalObjectReference{
+				Name: name,
+			},
+			Optional: &secretOptional,
+		},
+	})
+	return p
+}
+
+// SetAnnotations Set pod Annotations
+func (p *PodTemplate) SetAnnotations(annotations map[string]string) *PodTemplate {
+	p.initPod()
+
+	p.pod.SetAnnotations(annotations)
+	return p
+}
+
+// SetLabels Set pod Labels
+func (p *PodTemplate) SetLabels(labels map[string]string) *PodTemplate {
+	p.initPod()
+
+	p.pod.SetLabels(labels)
+	return p
+}
+
+// SetServiceAccountName Set pod serviceAccountName
+func (p *PodTemplate) SetServiceAccountName(saName string) *PodTemplate {
+	p.initPod()
+
+	p.pod.Spec.ServiceAccountName = saName
+	return p
+}
+
+// SetName Set pod name
+func (p *PodTemplate) SetName(name string) *PodTemplate {
+	p.initPod()
+
+	p.name = name
+	p.pod.SetName(name)
+	return p
+}
+
+// SetNamePrefix Set pod name prefix
+func (p *PodTemplate) SetNamePrefix(prefix string) *PodTemplate {
+	p.initPod()
+
+	p.namePrefix = prefix
+	p.pod.SetGenerateName(prefix)
+	return p
+}
+
+// SetAffinity Set pod affinity
+func (p *PodTemplate) SetAffinity(affinity *corev1.Affinity) *PodTemplate {
+	p.initPod()
+
+	p.pod.Spec.Affinity = affinity
+	return p
+}
+
+// AddEnv Add env to pod container
+func (p *PodTemplate) AddEnv(name, value string) *PodTemplate {
+	p.initPod()
+
+	name = strings.TrimSpace(name)
+	value = strings.TrimSpace(value)
+
+	// name and value can not be empty
+	if name == "" || value == "" {
+		return p
+	}
+
+	p.pod.Spec.Containers[0].Env = append(p.pod.Spec.Containers[0].Env, corev1.EnvVar{
+		Name:  name,
+		Value: value,
+	})
+	return p
+}
+
+// GetNamespace Get pod namespace
+func (p *PodTemplate) GetNamespace() string {
+	return p.namespace
 }
