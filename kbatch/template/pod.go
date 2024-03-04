@@ -1,6 +1,7 @@
 package template
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -31,6 +32,7 @@ const (
 	podNamespaceDefault  = corev1.NamespaceDefault
 )
 
+// executor for scripts like python / bash / groovy ...
 type scriptExecutor string
 
 const (
@@ -44,9 +46,9 @@ func (s scriptExecutor) String() string {
 
 type PodTemplate struct {
 	pod              *corev1.Pod
-	namespace        string
 	name             string
 	namePrefix       string
+	namespace        string
 	image            string
 	isPrivileged     bool
 	scriptExecutor   scriptExecutor
@@ -211,6 +213,34 @@ func (p *PodTemplate) Pod() *corev1.Pod {
 	return p.pod
 }
 
+func (p *PodTemplate) Validate() error {
+	if p.pod == nil {
+		return errors.New("pod is not initialized")
+	}
+
+	if p.pod.Name == "" || p.namePrefix == "" || p.name != p.pod.Name {
+		return errors.New("pod name or namePrefix is not valid")
+	}
+
+	if p.namespace == "" || p.namespace != p.pod.Namespace {
+		return errors.New("namespace is not valid")
+	}
+
+	if len(p.image) == 0 {
+		return errors.New("image is empty")
+	}
+	if len(p.scriptExecutor.String()) == 0 {
+		return errors.New("script executor is empty")
+	}
+	if len(p.scriptConfigMap.Name) == 0 {
+		return errors.New("script configmap is empty")
+	}
+	if len(p.configMapDataKey) == 0 {
+		return errors.New("configmap data key is empty")
+	}
+	return nil
+}
+
 func (p *PodTemplate) setScriptExecutor(executor scriptExecutor) *PodTemplate {
 	p.initPod()
 
@@ -321,8 +351,8 @@ func (p *PodTemplate) SetScript(configMapRef *corev1.ConfigMap, dataKey string, 
 }
 
 // NewPodTemplate Create PodTemplate
-func NewPodTemplate(namespace string, namePrefix string, isPrivileged bool, image string) *PodTemplate {
-	t := &PodTemplate{namespace: namespace, namePrefix: namePrefix, isPrivileged: isPrivileged, image: image}
+func NewPodTemplate(namePrefix string, namespace string, isPrivileged bool, image string) *PodTemplate {
+	t := &PodTemplate{namePrefix: namePrefix, namespace: namespace, isPrivileged: isPrivileged, image: image}
 
 	t.initPod()
 

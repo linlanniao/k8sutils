@@ -1,4 +1,4 @@
-package batch
+package kbatch
 
 import (
 	"errors"
@@ -84,18 +84,22 @@ func (ts *TaskSpec) Validate() error {
 		return errors.New("backoffLimit cannot be negative")
 	}
 
-	if ts.ActiveDeadlineSeconds != nil && *ts.ActiveDeadlineSeconds < 0 {
-		return errors.New("activeDeadlineSeconds cannot be negative")
+	// TODO ActiveDeadlineSeconds is not supported in this version
+	if ts.ActiveDeadlineSeconds != nil {
+		if *ts.ActiveDeadlineSeconds < 0 {
+			return errors.New("activeDeadlineSeconds cannot be negative")
+		}
+		return fmt.Errorf("field: %s, %w", "activeDeadlineSeconds", ErrNotSupported)
 	}
 
-	// NodeSelector is not supported in this version
+	// TODO NodeSelector is not supported in this version
 	if len(ts.NodeSelector) != 0 {
-		return errors.New("nodeSelector is not supported")
+		return fmt.Errorf("field: %s, %w", "nodeSelector", ErrNotSupported)
 	}
 
-	// Affinity is not supported in this version
+	// TODO Affinity is not supported in this version
 	if ts.Affinity != nil {
-		return errors.New("affinity is not supported")
+		return fmt.Errorf("field: %s, %w", "affinity", ErrNotSupported)
 	}
 
 	return nil
@@ -126,6 +130,10 @@ const (
 	TaskPrivilegeHostRoot    TaskPrivilege = "HostRoot"
 	TaskPrivilegeClusterRoot TaskPrivilege = "ClusterRoot"
 )
+
+func (t TaskPrivilege) String() string {
+	return string(t)
+}
 
 type ScriptType string
 
@@ -226,4 +234,20 @@ func NewTask(name, namespace, image, scriptContent string, scriptType ScriptType
 	}
 
 	return t, nil
+}
+
+func (t *Task) Run() error {
+	// try to validate job
+	if err := validate.Validate(t); err != nil {
+		return err
+	}
+
+	// create label with task information
+
+	// create configmap
+
+	// se
+
+	return nil
+
 }
