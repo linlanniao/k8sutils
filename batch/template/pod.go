@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/linlanniao/k8sutils/common"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -24,6 +25,10 @@ const (
 	scriptContentMountPath  = "/tmp"
 
 	podEnvFromSecretOptional bool = true
+
+	//podNameDefault       = "runner"
+	podNamePrefixDefault = "runner"
+	podNamespaceDefault  = corev1.NamespaceDefault
 )
 
 type scriptExecutor string
@@ -58,11 +63,21 @@ func (p *PodTemplate) initPod() *PodTemplate {
 
 	p.pod = &corev1.Pod{}
 
-	// set meta
+	// set default
+	if len(p.namespace) == 0 {
+		p.namespace = podNamespaceDefault
+	}
+	if len(p.namePrefix) == 0 {
+		p.namePrefix = podNamePrefixDefault
+	}
+	if len(p.name) == 0 {
+		p.name = fmt.Sprintf("%s-%s", p.namePrefix, common.RandLowerUpperNumStr(4))
+	}
+
+	// init pod metadata
 	p.pod.ObjectMeta = metav1.ObjectMeta{
-		Name:         p.name,
-		Namespace:    p.namespace,
-		GenerateName: p.namePrefix,
+		Name:      p.name,
+		Namespace: p.namespace,
 	}
 
 	// init pod spec
@@ -196,13 +211,6 @@ func (p *PodTemplate) Pod() *corev1.Pod {
 	return p.pod
 }
 
-func (p *PodTemplate) SetDefaultNamespaceIfEmpty() *PodTemplate {
-	if len(p.namespace) == 0 {
-		p.namespace = corev1.NamespaceDefault
-	}
-	return p
-}
-
 func (p *PodTemplate) setScriptExecutor(executor scriptExecutor) *PodTemplate {
 	p.initPod()
 
@@ -313,19 +321,8 @@ func (p *PodTemplate) SetScript(configMapRef *corev1.ConfigMap, dataKey string, 
 }
 
 // NewPodTemplate Create PodTemplate
-func NewPodTemplate(
-	namespace string,
-	name string,
-	isPrivileged bool,
-	image string,
-
-) *PodTemplate {
-	t := &PodTemplate{
-		namespace:    namespace,
-		name:         name,
-		isPrivileged: isPrivileged,
-		image:        image,
-	}
+func NewPodTemplate(namespace string, namePrefix string, isPrivileged bool, image string) *PodTemplate {
+	t := &PodTemplate{namespace: namespace, namePrefix: namePrefix, isPrivileged: isPrivileged, image: image}
 
 	t.initPod()
 
@@ -368,6 +365,16 @@ func (p *PodTemplate) SetLabels(labels map[string]string) *PodTemplate {
 	return p
 }
 
+func (p *PodTemplate) SetLabel(key string, value string) *PodTemplate {
+	p.initPod()
+
+	if p.pod.Labels == nil {
+		p.pod.Labels = map[string]string{}
+	}
+	p.pod.Labels[key] = value
+	return p
+}
+
 // SetServiceAccountName Set pod serviceAccountName
 func (p *PodTemplate) SetServiceAccountName(saName string) *PodTemplate {
 	p.initPod()
@@ -382,15 +389,20 @@ func (p *PodTemplate) SetName(name string) *PodTemplate {
 
 	p.name = name
 	p.pod.SetName(name)
+
+	// clean namePrefix
+	p.namePrefix = ""
+
 	return p
 }
 
-// SetNamePrefix Set pod name prefix
-func (p *PodTemplate) SetNamePrefix(prefix string) *PodTemplate {
+// SetNameAndPrefix Set pod name prefix, and update name
+func (p *PodTemplate) SetNameAndPrefix(prefix string) *PodTemplate {
 	p.initPod()
 
 	p.namePrefix = prefix
-	p.pod.SetGenerateName(prefix)
+	p.name = prefix + "-" + common.RandStr(5, true, false, true)
+	p.pod.SetName(p.name)
 	return p
 }
 
@@ -421,7 +433,11 @@ func (p *PodTemplate) AddEnv(name, value string) *PodTemplate {
 	return p
 }
 
-// GetNamespace Get pod namespace
-func (p *PodTemplate) GetNamespace() string {
+// Namespace Get pod namespace
+func (p *PodTemplate) Namespace() string {
 	return p.namespace
+}
+
+func (p *PodTemplate) Name() string {
+	return p.name
 }
