@@ -57,6 +57,8 @@ type PodTemplate struct {
 	args             []string
 }
 
+// initPod initializes the pod if it hasn't been initialized yet.
+// It returns the PodTemplate instance.
 func (p *PodTemplate) initPod() *PodTemplate {
 	// skip if pod is already initialized
 	if p.pod != nil {
@@ -211,11 +213,13 @@ func (p *PodTemplate) Pod() *corev1.Pod {
 	return p.pod
 }
 
+// Validate checks the validity of the pod template.
 func (p *PodTemplate) Validate() error {
 	if p.pod == nil {
 		return errors.New("pod is not initialized")
 	}
 
+	// Validate pod name and generateName.
 	if p.pod.Name == "" ||
 		p.generateName == "" ||
 		strings.HasPrefix(p.generateName, p.name) ||
@@ -223,25 +227,37 @@ func (p *PodTemplate) Validate() error {
 		return errors.New("pod name or generateName is not valid")
 	}
 
+	// Validate pod namespace.
 	if p.namespace == "" || p.namespace != p.pod.Namespace {
 		return errors.New("namespace is not valid")
 	}
 
+	// Validate image.
 	if len(p.image) == 0 {
 		return errors.New("image is empty")
 	}
+
+	// Validate script executor.
 	if len(p.scriptExecutor.String()) == 0 {
 		return errors.New("script executor is empty")
 	}
+
+	// Validate script configmap.
 	if len(p.scriptConfigMap.Name) == 0 {
 		return errors.New("script configmap is empty")
 	}
+
+	// Validate configmap data key.
 	if len(p.configMapDataKey) == 0 {
 		return errors.New("configmap data key is empty")
 	}
+
 	return nil
 }
 
+// setScriptExecutor sets the script executor for the PodTemplate and initializes the script executor.
+// If the PodTemplate is not privileged, it sets the command for the container based on the script executor.
+// If the PodTemplate is privileged, it sets the command for the container to use nsenter with the script executor.
 func (p *PodTemplate) setScriptExecutor(executor ScriptExecutor) *PodTemplate {
 	p.initPod()
 
@@ -316,9 +332,10 @@ func (p *PodTemplate) SetScript(configMapRef *corev1.ConfigMap, dataKey string, 
 
 	// find runner container
 	var runnerContainer *corev1.Container
-	for _, c := range p.pod.Spec.Containers {
-		if c.Name == podContainerNormalName || c.Name == podContainerNsenterName {
-			runnerContainer = &c
+	for idx := range p.pod.Spec.Containers {
+		if p.pod.Spec.Containers[idx].Name == podContainerNormalName ||
+			p.pod.Spec.Containers[idx].Name == podContainerNsenterName {
+			runnerContainer = &p.pod.Spec.Containers[idx]
 			break
 		}
 	}
@@ -351,21 +368,36 @@ func (p *PodTemplate) SetScript(configMapRef *corev1.ConfigMap, dataKey string, 
 	return p
 }
 
-// NewPodTemplate Create PodTemplate
+// NewPodTemplate creates a new PodTemplate instance.
+//
+// Args:
+// generateName: the generate name of the pod.
+// namespace: the namespace of the pod.
+// isPrivileged: whether the pod is privileged.
+// image: the image of the pod.
+//
+// Returns:
+// a new PodTemplate instance.
 func NewPodTemplate(generateName string, namespace string, isPrivileged bool, image string) *PodTemplate {
-
 	if !strings.HasSuffix(generateName, "-") {
 		generateName = generateName + "-"
 	}
 
 	t := &PodTemplate{generateName: generateName, namespace: namespace, isPrivileged: isPrivileged, image: image}
 
+	// initializes the pod if it hasn't been initialized yet.
 	t.initPod()
 
 	return t
 }
 
-// SetGlobalConfigSecretName Set the global configuration of SecretName
+// SetGlobalConfigSecretName sets the name of the global configuration secret that will be mounted into the container as environment variables.
+// The secret must contain key-value pairs of strings, where the keys are the names of the environment variables and the values are the values of the environment variables.
+// If the secret does not exist or is empty, the environment variables will not be set.
+// If the secret exists but some keys are missing or have empty values, the environment variables will be set with the default values.
+// If the secret exists and all keys have non-empty values, the environment variables will be set with the values from the secret.
+// If the secret exists and all keys have non-empty values, and some keys have empty values, the environment variables will be set with the values from the secret, except for the keys with empty values, which will be set with the default values.
+// This function modifies the PodTemplate object.
 func (p *PodTemplate) SetGlobalConfigSecretName(name string) *PodTemplate {
 	p.initPod()
 
@@ -385,7 +417,8 @@ func (p *PodTemplate) SetGlobalConfigSecretName(name string) *PodTemplate {
 	return p
 }
 
-// SetAnnotations Set pod Annotations
+// SetAnnotations sets the annotations of the pod.
+// This function modifies the PodTemplate object.
 func (p *PodTemplate) SetAnnotations(annotations map[string]string) *PodTemplate {
 	p.initPod()
 
@@ -393,7 +426,8 @@ func (p *PodTemplate) SetAnnotations(annotations map[string]string) *PodTemplate
 	return p
 }
 
-// SetLabels Set pod Labels
+// SetLabels sets the labels of the pod.
+// This function modifies the PodTemplate object.
 func (p *PodTemplate) SetLabels(labels map[string]string) *PodTemplate {
 	p.initPod()
 
@@ -401,6 +435,8 @@ func (p *PodTemplate) SetLabels(labels map[string]string) *PodTemplate {
 	return p
 }
 
+// SetLabel sets the label of the pod.
+// This function modifies the PodTemplate object.
 func (p *PodTemplate) SetLabel(key string, value string) *PodTemplate {
 	p.initPod()
 
@@ -411,7 +447,8 @@ func (p *PodTemplate) SetLabel(key string, value string) *PodTemplate {
 	return p
 }
 
-// SetServiceAccountName Set pod serviceAccountName
+// SetServiceAccountName sets the service account name of the pod.
+// This function modifies the PodTemplate object.
 func (p *PodTemplate) SetServiceAccountName(saName string) *PodTemplate {
 	p.initPod()
 
@@ -419,7 +456,8 @@ func (p *PodTemplate) SetServiceAccountName(saName string) *PodTemplate {
 	return p
 }
 
-// SetName Set pod name
+// SetName sets the name of the pod.
+// This function modifies the PodTemplate object.
 func (p *PodTemplate) SetName(name string) *PodTemplate {
 	p.initPod()
 
@@ -432,7 +470,8 @@ func (p *PodTemplate) SetName(name string) *PodTemplate {
 	return p
 }
 
-// SetGenerateNameReGenerate sets the pod name prefix, and updates the pod name.
+// SetGenerateNameReGenerate sets the generateName and regenerates the name of the pod.
+// This function modifies the PodTemplate object.
 func (p *PodTemplate) SetGenerateNameReGenerate(generateName string) *PodTemplate {
 	p.initPod()
 
@@ -446,7 +485,8 @@ func (p *PodTemplate) SetGenerateNameReGenerate(generateName string) *PodTemplat
 	return p
 }
 
-// SetAffinity Set pod affinity
+// SetAffinity sets the affinity of the pod.
+// This function modifies the PodTemplate object.
 func (p *PodTemplate) SetAffinity(affinity *corev1.Affinity) *PodTemplate {
 	p.initPod()
 
@@ -454,7 +494,14 @@ func (p *PodTemplate) SetAffinity(affinity *corev1.Affinity) *PodTemplate {
 	return p
 }
 
-// AddEnv Add env to pod container
+// AddEnv adds an environment variable to the container.
+//
+// Args:
+// name: the name of the environment variable.
+// value: the value of the environment variable.
+//
+// Returns:
+// the PodTemplate instance.
 func (p *PodTemplate) AddEnv(name, value string) *PodTemplate {
 	p.initPod()
 
@@ -466,18 +513,21 @@ func (p *PodTemplate) AddEnv(name, value string) *PodTemplate {
 		return p
 	}
 
+	// add to container env
 	p.pod.Spec.Containers[0].Env = append(p.pod.Spec.Containers[0].Env, corev1.EnvVar{
 		Name:  name,
 		Value: value,
 	})
+
 	return p
 }
 
-// Namespace Get pod namespace
+// Namespace returns the namespace of the PodTemplate.
 func (p *PodTemplate) Namespace() string {
 	return p.namespace
 }
 
+// Name returns the name of the PodTemplate.
 func (p *PodTemplate) Name() string {
 	return p.name
 }

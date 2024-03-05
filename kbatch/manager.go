@@ -2,6 +2,7 @@ package kbatch
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/linlanniao/k8sutils"
@@ -19,23 +20,29 @@ const (
 	ManagerConfigMapScriptName = "script"
 )
 
-var singleMgr *manager
+var (
+	singleMgr     *manager
+	singleMgrOnce sync.Once
+)
 
 type manager struct {
-	cli         *k8sutils.Clientset
+	clientset   *k8sutils.Clientset
 	trackingMap *sync.Map
-	once        sync.Once
 }
 
 func Manager() *manager {
-	singleMgr.once.Do(func() {
+	singleMgrOnce.Do(func() {
 		singleMgr = &manager{
-			cli:         k8sutils.GetClientset(),
+			clientset:   k8sutils.GetClientset(),
 			trackingMap: &sync.Map{},
 		}
 	})
 
 	return singleMgr
+}
+
+func (m *manager) Clientset() *k8sutils.Clientset {
+	return m.clientset
 }
 
 func (m *manager) LabelDefault() map[string]string {
@@ -78,7 +85,7 @@ func (m *manager) RunTask(ctx context.Context, task *Task) (err error) {
 	}
 
 	// create configmap
-	_, err = m.cli.CreateConfigMap(ctx, cmTmpl.Namespace(), cmTmpl.ConfigMap())
+	_, err = m.clientset.CreateConfigMap(ctx, cmTmpl.Namespace(), cmTmpl.ConfigMap())
 	if err != nil {
 		return err
 	}
@@ -100,10 +107,58 @@ func (m *manager) RunTask(ctx context.Context, task *Task) (err error) {
 	}
 
 	// create pod
-	_, err = m.cli.CreatePod(ctx, podTmpl.Namespace(), podTmpl.Pod())
+	_, err = m.clientset.CreatePod(ctx, podTmpl.Namespace(), podTmpl.Pod())
 	if err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func (m *manager) GetTrackingTask(key string) (*Task, error) {
+	val, ok := m.trackingMap.Load(key)
+	if !ok {
+		return nil, fmt.Errorf("key %s not found in tracking map", key)
+	}
+
+	task, ok := val.(*Task)
+	if !ok {
+		return nil, fmt.Errorf("value of key %s is not a Task", key)
+	}
+
+	return task, nil
+}
+
+func (m *manager) CleanupTask(ctx context.Context, task *Task) (err error) {
+
+	matchLabels := m.LabelDefault()
+	matchLabels[TaskLabelAddKey] = task.GetName()
+
+	// query pods
+	podLst, err := m.clientset.ListPod(ctx, task.GetNamespace(), matchLabels)
+	if err != nil {
+		return err
+	}
+	// delete pod
+	for _, pod := range podLst.Items {
+		if err := m.clientset.DeletePod(ctx, pod.Namespace, pod.Name); err != nil {
+			return err
+		}
+	}
+
+	// query configmap
+	cmLst, err := m.clientset.ListConfigMap(ctx, task.GetNamespace(), matchLabels)
+	if err != nil {
+		return err
+	}
+
+	// delete configmap
+	for _, cm := range cmLst.Items {
+		if err := m.clientset.DeleteConfigMap(ctx, cm.Namespace, cm.Name); err != nil {
+			return err
+		}
+	}
+
+	return nil
+
 }

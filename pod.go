@@ -37,6 +37,8 @@ func (c *Clientset) GetPodStatus(ctx context.Context, namespace, podName string)
 	return pod.Status, nil
 }
 
+// ListPod lists all pods in the specified namespace that match the specified labels.
+// If no labels are specified, all pods in the namespace are returned.
 func (c *Clientset) ListPod(ctx context.Context, namespace string, selectedLabels map[string]string) (*corev1.PodList, error) {
 	selector := labels.NewSelector()
 
@@ -57,6 +59,10 @@ func (c *Clientset) ListPod(ctx context.Context, namespace string, selectedLabel
 	})
 }
 
+// TailLogs tails the logs of the specified pod in the specified namespace and sends them to the specified channel.
+// The function closes the channel when it's done.
+//
+// The function returns an error if it fails to tail the logs.
 func (c *Clientset) TailLogs(ctx context.Context, namespace, podName string, logsCh chan<- string) error {
 	defer close(logsCh)
 	opts := &corev1.PodLogOptions{
@@ -85,18 +91,33 @@ func (c *Clientset) TailLogs(ctx context.Context, namespace, podName string, log
 	}
 }
 
+// GetLogs returns the logs of the specified pod in the specified namespace.
+//
+// The function sends the log lines to the specified channel and closes the channel when it's done.
+// If an error occurs, the function returns the error.
 func (c *Clientset) GetLogs(ctx context.Context, namespace, podName string, logsCh chan<- string) error {
+	// The function starts by closing the logs channel to prevent any further log lines from being sent.
 	defer close(logsCh)
+
+	// Create a new PodLogOptions struct and set the Timestamps field to true to include timestamps in the log lines.
 	opts := &corev1.PodLogOptions{
 		Timestamps: true,
 	}
+
+	// Create a new request to retrieve the logs of the specified pod.
 	req := c.clientset.CoreV1().Pods(namespace).GetLogs(podName, opts)
+
+	// Start streaming the logs from the Kubernetes API server.
 	logStream, err := req.Stream(ctx)
 	if err != nil {
 		return err
 	}
 	defer logStream.Close()
+
+	// Create a new buffered reader to read the logs from the streaming response.
 	reader := bufio.NewReader(logStream)
+
+	// Loop until the streaming response is closed, and send each log line to the logs channel.
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
@@ -119,19 +140,34 @@ type LogLine struct {
 
 type LogLines []LogLine
 
+// GetOrTailLogs returns the logs of the specified pod in the specified namespace.
+//
+// The function sends the log lines to the specified channel and closes the channel when it's done.
+// If an error occurs, the function returns the error.
 func (c *Clientset) GetOrTailLogs(ctx context.Context, namespace, podName string, logsCh chan<- LogLine, tail bool) error {
+	// The function starts by closing the logs channel to prevent any further log lines from being sent.
 	defer close(logsCh)
+
+	// Create a new PodLogOptions struct and set the Timestamps field to true to include timestamps in the log lines.
 	logOptions := &corev1.PodLogOptions{
 		Timestamps: true,
 		Follow:     tail, // log tail
 	}
+
+	// Create a new request to retrieve the logs of the specified pod.
 	req := c.clientset.CoreV1().Pods(namespace).GetLogs(podName, logOptions)
+
+	// Start streaming the logs from the Kubernetes API server.
 	logStream, err := req.Stream(ctx)
 	if err != nil {
 		return err
 	}
 	defer logStream.Close()
+
+	// Create a new buffered reader to read the logs from the streaming response.
 	reader := bufio.NewReader(logStream)
+
+	// Loop until the streaming response is closed, and send each log line to the logs channel.
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {

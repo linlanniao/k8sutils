@@ -49,5 +49,5 @@ func GenerateName2Name(generateName string) string {
 	if !strings.HasSuffix(generateName, "-") {
 		generateName = generateName + "-"
 	}
-	return generateName + RandStr(6, true, true, true)
+	return generateName + RandStr(6, true, false, true)
 }

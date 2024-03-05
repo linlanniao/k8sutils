@@ -43,6 +43,7 @@ func NewConfigMapTemplate(generateName, namespace, scriptName, scriptContent str
 	return c
 }
 
+// Validate checks the validity of the ConfigMapTemplate instance
 func (c *ConfigMapTemplate) Validate() error {
 	if c.configMap == nil {
 		return errors.New("configMap is not initialized")
@@ -78,7 +79,7 @@ func (c *ConfigMapTemplate) Validate() error {
 	return nil
 }
 
-// ConfigMap returns the ConfigMap object
+// ConfigMap returns the ConfigMap instance
 func (c *ConfigMapTemplate) ConfigMap() *corev1.ConfigMap {
 	return c.configMap
 }
@@ -88,11 +89,14 @@ func (c *ConfigMapTemplate) Name() string {
 	return c.name
 }
 
-// Namespace Get configMap namespace
+// Namespace returns the namespace of the ConfigMap
 func (c *ConfigMapTemplate) Namespace() string {
 	return c.namespace
 }
 
+// initConfigMap initializes the ConfigMap instance if it is not already initialized.
+// It sets default values for the generateName and namespace fields, and generates a unique name for the ConfigMap.
+// It also initializes the Data field with the script content.
 func (c *ConfigMapTemplate) initConfigMap() *ConfigMapTemplate {
 	// skip if configmap is already initialized
 	if c.configMap != nil {
@@ -121,6 +125,10 @@ func (c *ConfigMapTemplate) initConfigMap() *ConfigMapTemplate {
 	return c
 }
 
+// SetLabels sets the labels of the ConfigMapTemplate.
+//
+// This function initializes the ConfigMap instance if it is not already initialized.
+// It then sets the labels on the ConfigMap instance and returns the ConfigMapTemplate instance.
 func (c *ConfigMapTemplate) SetLabels(labels map[string]string) *ConfigMapTemplate {
 	c.initConfigMap()
 
@@ -128,6 +136,10 @@ func (c *ConfigMapTemplate) SetLabels(labels map[string]string) *ConfigMapTempla
 	return c
 }
 
+// SetLabel sets the value of a label on the ConfigMapTemplate.
+//
+// This function initializes the ConfigMap instance if it is not already initialized.
+// It then sets the label on the ConfigMap instance and returns the ConfigMapTemplate instance.
 func (c *ConfigMapTemplate) SetLabel(key string, value string) *ConfigMapTemplate {
 	c.initConfigMap()
 
