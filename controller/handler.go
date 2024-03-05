@@ -5,7 +5,9 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/selection"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
@@ -34,6 +36,7 @@ type Handler struct {
 	workers             int
 	onAddedUpdatedFuncs []OnAddedUpdatedFunc
 	onDeletedFuncs      []OnDeletedFunc
+	selector            labels.Selector
 }
 
 // NewHandler creates a new Handler.
@@ -48,15 +51,31 @@ func NewHandler(
 	onDeletedFuncs []OnDeletedFunc,
 ) *Handler {
 
+	h := &Handler{
+		name:                name,
+		resource:            resource,
+		kind:                kind,
+		indexer:             nil,
+		queue:               nil,
+		informer:            nil,
+		restClient:          restClient,
+		workers:             0,
+		onAddedUpdatedFuncs: onAddedUpdatedFuncs,
+		onDeletedFuncs:      onDeletedFuncs,
+		selector:            nil,
+	}
+
 	optionsModifier := func(options *metav1.ListOptions) {
-		s := fmt.Sprintf("%s/%s=%s", handlerKey, resource, name)
-		options.LabelSelector = s
+		options.LabelSelector = h.Selector().String()
 	}
 
 	listWatcher := cache.NewFilteredListWatchFromClient(restClient, resource, namespace, optionsModifier)
 
+	// setup queue
 	queue := workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
+	h.queue = queue
 
+	// setup informer and indexer
 	indexer, informer := cache.NewIndexerInformer(listWatcher, kind, resyncPeriod, cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj any) {
 			key, err := cache.MetaNamespaceKeyFunc(obj)
@@ -79,23 +98,16 @@ func NewHandler(
 			}
 		},
 	}, cache.Indexers{})
+	h.informer = informer
+	h.indexer = indexer
 
-	if workers >= 0 {
+	// setup workers
+	if workers <= 0 {
 		workers = defaultWorkers
 	}
+	h.workers = workers
 
-	return &Handler{
-		name:                name,
-		resource:            resource,
-		kind:                kind,
-		indexer:             indexer,
-		queue:               queue,
-		informer:            informer,
-		restClient:          restClient,
-		workers:             workers,
-		onAddedUpdatedFuncs: onAddedUpdatedFuncs,
-		onDeletedFuncs:      onDeletedFuncs,
-	}
+	return h
 }
 
 func (h *Handler) processNextItem() bool {
@@ -208,4 +220,22 @@ func (h *Handler) Run(stopCh chan struct{}) {
 
 	<-stopCh
 	klog.Infof("stopping %s handler", h.name)
+}
+
+func (h *Handler) Selector() labels.Selector {
+	if h.selector != nil {
+		return h.selector
+	}
+	selector := labels.NewSelector()
+
+	key := handlerKey + "/" + h.resource
+	value := h.name
+
+	req, _ := labels.NewRequirement(key, selection.Equals, []string{value})
+
+	selector = selector.Add(*req)
+
+	h.selector = selector
+
+	return h.selector
 }

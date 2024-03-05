@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/linlanniao/k8sutils"
+	"github.com/linlanniao/k8sutils/controller"
 	"github.com/linlanniao/k8sutils/kbatch/template"
 	"github.com/linlanniao/k8sutils/validate"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -28,6 +29,7 @@ var (
 type manager struct {
 	clientset   *k8sutils.Clientset
 	trackingMap *sync.Map
+	controller  *controller.Controller
 }
 
 func Manager() *manager {
@@ -39,6 +41,20 @@ func Manager() *manager {
 	})
 
 	return singleMgr
+}
+
+func (m *manager) initController() error {
+	// skip init if already inited
+	if m.controller != nil {
+		return nil
+	}
+
+	// init pod handler
+	podHander := controller.NewPodHandler() // TODO
+
+	// init controller
+	m.controller = controller.NewController()
+
 }
 
 func (m *manager) Clientset() *k8sutils.Clientset {
