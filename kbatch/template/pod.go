@@ -28,30 +28,30 @@ const (
 	podEnvFromSecretOptional bool = true
 
 	//podNameDefault       = "runner"
-	podNamePrefixDefault = "runner"
-	podNamespaceDefault  = corev1.NamespaceDefault
+	podGenerateNameDefault = "runner-"
+	podNamespaceDefault    = corev1.NamespaceDefault
 )
 
-// executor for scripts like python / bash / groovy ...
-type scriptExecutor string
+// ScriptExecutor executor for scripts like python / bash / groovy ...
+type ScriptExecutor string
 
 const (
-	scriptExecutorBash   scriptExecutor = "bash"
-	scriptExecutorPython scriptExecutor = "python"
+	scriptExecutorBash   ScriptExecutor = "bash"
+	scriptExecutorPython ScriptExecutor = "python"
 )
 
-func (s scriptExecutor) String() string {
+func (s ScriptExecutor) String() string {
 	return string(s)
 }
 
 type PodTemplate struct {
 	pod              *corev1.Pod
 	name             string
-	namePrefix       string
+	generateName     string
 	namespace        string
 	image            string
 	isPrivileged     bool
-	scriptExecutor   scriptExecutor
+	scriptExecutor   ScriptExecutor
 	scriptConfigMap  *corev1.ConfigMap // script content config map
 	configMapDataKey string            // key for configmap.data field
 	args             []string
@@ -69,12 +69,10 @@ func (p *PodTemplate) initPod() *PodTemplate {
 	if len(p.namespace) == 0 {
 		p.namespace = podNamespaceDefault
 	}
-	if len(p.namePrefix) == 0 {
-		p.namePrefix = podNamePrefixDefault
+	if len(p.generateName) == 0 {
+		p.generateName = podGenerateNameDefault
 	}
-	if len(p.name) == 0 {
-		p.name = fmt.Sprintf("%s-%s", p.namePrefix, common.RandLowerUpperNumStr(4))
-	}
+	p.name = common.GenerateName2Name(p.generateName)
 
 	// init pod metadata
 	p.pod.ObjectMeta = metav1.ObjectMeta{
@@ -218,8 +216,11 @@ func (p *PodTemplate) Validate() error {
 		return errors.New("pod is not initialized")
 	}
 
-	if p.pod.Name == "" || p.namePrefix == "" || p.name != p.pod.Name {
-		return errors.New("pod name or namePrefix is not valid")
+	if p.pod.Name == "" ||
+		p.generateName == "" ||
+		strings.HasPrefix(p.generateName, p.name) ||
+		p.name != p.pod.Name {
+		return errors.New("pod name or generateName is not valid")
 	}
 
 	if p.namespace == "" || p.namespace != p.pod.Namespace {
@@ -241,7 +242,7 @@ func (p *PodTemplate) Validate() error {
 	return nil
 }
 
-func (p *PodTemplate) setScriptExecutor(executor scriptExecutor) *PodTemplate {
+func (p *PodTemplate) setScriptExecutor(executor ScriptExecutor) *PodTemplate {
 	p.initPod()
 
 	p.scriptExecutor = executor
@@ -266,7 +267,7 @@ func (p *PodTemplate) setScriptExecutor(executor scriptExecutor) *PodTemplate {
 }
 
 // SetScript sets the script configmap and data key
-func (p *PodTemplate) SetScript(configMapRef *corev1.ConfigMap, dataKey string, executor scriptExecutor) *PodTemplate {
+func (p *PodTemplate) SetScript(configMapRef *corev1.ConfigMap, dataKey string, executor ScriptExecutor) *PodTemplate {
 	p.initPod()
 
 	p.setScriptExecutor(executor)
@@ -351,8 +352,13 @@ func (p *PodTemplate) SetScript(configMapRef *corev1.ConfigMap, dataKey string, 
 }
 
 // NewPodTemplate Create PodTemplate
-func NewPodTemplate(namePrefix string, namespace string, isPrivileged bool, image string) *PodTemplate {
-	t := &PodTemplate{namePrefix: namePrefix, namespace: namespace, isPrivileged: isPrivileged, image: image}
+func NewPodTemplate(generateName string, namespace string, isPrivileged bool, image string) *PodTemplate {
+
+	if !strings.HasSuffix(generateName, "-") {
+		generateName = generateName + "-"
+	}
+
+	t := &PodTemplate{generateName: generateName, namespace: namespace, isPrivileged: isPrivileged, image: image}
 
 	t.initPod()
 
@@ -421,17 +427,21 @@ func (p *PodTemplate) SetName(name string) *PodTemplate {
 	p.pod.SetName(name)
 
 	// clean namePrefix
-	p.namePrefix = ""
+	p.generateName = ""
 
 	return p
 }
 
-// SetNameAndPrefix Set pod name prefix, and update name
-func (p *PodTemplate) SetNameAndPrefix(prefix string) *PodTemplate {
+// SetGenerateNameReGenerate sets the pod name prefix, and updates the pod name.
+func (p *PodTemplate) SetGenerateNameReGenerate(generateName string) *PodTemplate {
 	p.initPod()
 
-	p.namePrefix = prefix
-	p.name = prefix + "-" + common.RandStr(5, true, false, true)
+	if !strings.HasSuffix(generateName, "-") {
+		generateName = generateName + "-"
+	}
+
+	p.generateName = generateName
+	p.name = common.GenerateName2Name(p.generateName)
 	p.pod.SetName(p.name)
 	return p
 }

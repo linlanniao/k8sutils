@@ -1,6 +1,9 @@
 package common
 
-import "math/rand/v2"
+import (
+	"math/rand/v2"
+	"strings"
+)
 
 const (
 	lowerUpperNumStr = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
@@ -39,4 +42,12 @@ func RandUpperStr(length int) string {
 }
 func RandNumStr(length int) string {
 	return RandStr(length, false, false, true)
+}
+
+func GenerateName2Name(generateName string) string {
+	generateName = strings.TrimSpace(generateName)
+	if !strings.HasSuffix(generateName, "-") {
+		generateName = generateName + "-"
+	}
+	return generateName + RandStr(6, true, true, true)
 }

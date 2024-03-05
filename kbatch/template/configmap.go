@@ -2,7 +2,7 @@ package template
 
 import (
 	"errors"
-	"fmt"
+	"strings"
 
 	"github.com/linlanniao/k8sutils/common"
 	corev1 "k8s.io/api/core/v1"
@@ -10,24 +10,29 @@ import (
 )
 
 const (
-	cmNamePrefixDefault = "script"
-	cmNamespaceDefault  = corev1.NamespaceDefault
+	cmGenerateNameDefault = "script-"
+	cmNamespaceDefault    = corev1.NamespaceDefault
 )
 
 // ConfigMapTemplate creates a ConfigMap with a single key-value pair
 type ConfigMapTemplate struct {
 	configMap     *corev1.ConfigMap
 	name          string
-	namePrefix    string
+	generateName  string
 	namespace     string
 	scriptName    string
 	scriptContent string
 }
 
 // NewConfigMapTemplate creates a new ConfigMapTemplate instance
-func NewConfigMapTemplate(namePrefix, namespace, scriptName, scriptContent string) *ConfigMapTemplate {
+func NewConfigMapTemplate(generateName, namespace, scriptName, scriptContent string) *ConfigMapTemplate {
+
+	if !strings.HasSuffix(generateName, "-") {
+		generateName = generateName + "-"
+	}
+
 	c := &ConfigMapTemplate{
-		namePrefix:    namePrefix,
+		generateName:  generateName,
 		namespace:     namespace,
 		scriptName:    scriptName,
 		scriptContent: scriptContent,
@@ -43,7 +48,10 @@ func (c *ConfigMapTemplate) Validate() error {
 		return errors.New("configMap is not initialized")
 	}
 
-	if c.configMap.Name == "" || c.namePrefix == "" || c.name != c.configMap.Name {
+	if c.configMap.Name == "" ||
+		c.generateName == "" ||
+		strings.HasPrefix(c.generateName, c.name) ||
+		c.name != c.configMap.Name {
 		return errors.New("configMap name or namePrefix is not valid")
 	}
 
@@ -80,6 +88,11 @@ func (c *ConfigMapTemplate) Name() string {
 	return c.name
 }
 
+// Namespace Get configMap namespace
+func (c *ConfigMapTemplate) Namespace() string {
+	return c.namespace
+}
+
 func (c *ConfigMapTemplate) initConfigMap() *ConfigMapTemplate {
 	// skip if configmap is already initialized
 	if c.configMap != nil {
@@ -90,13 +103,10 @@ func (c *ConfigMapTemplate) initConfigMap() *ConfigMapTemplate {
 	if len(c.namespace) == 0 {
 		c.namespace = cmNamespaceDefault
 	}
-	if len(c.namePrefix) == 0 {
-		c.namePrefix = cmNamePrefixDefault
+	if len(c.generateName) == 0 {
+		c.generateName = cmGenerateNameDefault
 	}
-	if len(c.name) == 0 {
-		c.name = fmt.Sprintf("%s-%s", c.namePrefix, common.RandStr(5, true, false, true))
-
-	}
+	c.name = common.GenerateName2Name(c.generateName)
 
 	// init configmap
 	c.configMap = &corev1.ConfigMap{

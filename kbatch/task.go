@@ -3,11 +3,19 @@ package kbatch
 import (
 	"errors"
 	"fmt"
+	"strings"
 
+	"github.com/linlanniao/k8sutils/common"
+	"github.com/linlanniao/k8sutils/kbatch/template"
 	"github.com/linlanniao/k8sutils/validate"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+const (
+	taskGenerateNameDefault = "task-"
+	taskNamespaceDefault    = corev1.NamespaceDefault
 )
 
 type Task struct {
@@ -151,6 +159,10 @@ const (
 	ScriptTypeBash   ScriptType = "bash"
 )
 
+func (s ScriptType) AsExecutor() template.ScriptExecutor {
+	return template.ScriptExecutor(s)
+}
+
 type TaskOption func(task *Task)
 
 func WithPrivilege(privilege TaskPrivilege) TaskOption {
@@ -210,8 +222,21 @@ func WithAffinity(affinity *corev1.Affinity) TaskOption {
 	}
 }
 
-func NewTask(name, namespace, image, scriptContent string, scriptType ScriptType, opts ...TaskOption) (*Task, error) {
+func NewTask(generateName, namespace, image, scriptContent string, scriptType ScriptType, opts ...TaskOption) (*Task, error) {
 	t := new(Task)
+
+	// set default
+	if generateName == "" {
+		generateName = taskGenerateNameDefault
+	}
+	if namespace == "" {
+		namespace = taskNamespaceDefault
+	}
+
+	if !strings.HasSuffix(generateName, "-") {
+		generateName = generateName + "-"
+	}
+	name := common.GenerateName2Name(generateName)
 
 	t.ObjectMeta = metav1.ObjectMeta{
 		Name:      name,
@@ -234,20 +259,4 @@ func NewTask(name, namespace, image, scriptContent string, scriptType ScriptType
 	}
 
 	return t, nil
-}
-
-func (t *Task) Run() error {
-	// try to validate job
-	if err := validate.Validate(t); err != nil {
-		return err
-	}
-
-	// create label with task information
-
-	// create configmap
-
-	// se
-
-	return nil
-
 }
