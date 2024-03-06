@@ -26,7 +26,7 @@ func createPod() (string, error) {
 			Name:      name,
 			Namespace: ns,
 			Labels: map[string]string{
-				"handler.k8sutils.ppops.cn/pod": "banana",
+				"handler.k8sutils.ppops.cn/pods": "banana",
 			},
 		},
 		Spec: corev1.PodSpec{
@@ -57,31 +57,34 @@ func TestCreatePod(t *testing.T) {
 }
 
 func TestNewPodHandler(t *testing.T) {
-	addedUpdateFunc := func(key string, obj any) error {
+	addedUpdateFunc := func(key string, pod *corev1.Pod) error {
 		fmt.Println(key)
-		fmt.Println(obj)
+		fmt.Println(pod.GetName())
 		return nil
 	}
 	deletedFunc := func(key string) error {
 		fmt.Println(key)
 		return nil
 	}
-	h := controller.NewPodHandler(
+
+	ph := controller.NewPodHandler(
 		"banana",
 		"default",
-		4,
-		[]controller.OnAddedUpdatedFunc{addedUpdateFunc},
-		[]controller.OnDeletedFunc{deletedFunc},
+		3,
+		addedUpdateFunc,
+		deletedFunc,
+		k8sutils.GetClientset(),
 	)
+
 	c := controller.NewController()
-	c.AddHandler(h)
+	c.AddHandler(ph)
 	go func() {
 		err := c.Start(context.Background())
 		assert.NoError(t, err)
 	}()
 
 	names := make([]string, 0)
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 3; i++ {
 		podName, err := createPod()
 		if err == nil {
 			names = append(names, podName)

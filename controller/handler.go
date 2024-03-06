@@ -10,7 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/selection"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/rest"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
@@ -18,65 +18,73 @@ import (
 
 const (
 	handlerKey         = "handler.k8sutils.ppops.cn"
-	resyncPeriod       = 2 * time.Minute
+	reSyncPeriod       = 2 * time.Minute
 	defaultWorkers int = 3
 )
 
-type OnAddedUpdatedFunc func(key string, obj any) error
-type OnDeletedFunc func(key string) error
-
-type Handler struct {
-	name                string
-	resource            string
-	kind                runtime.Object
-	indexer             cache.Indexer
-	queue               workqueue.RateLimitingInterface
-	informer            cache.Controller
-	restClient          rest.Interface
-	workers             int
-	onAddedUpdatedFuncs []OnAddedUpdatedFunc
-	onDeletedFuncs      []OnDeletedFunc
-	selector            labels.Selector
+type handlerService interface {
+	Name() string
+	Namespace() string
+	OnAddedUpdated(key string, obj any) error
+	OnDeleted(key string) error
+	GetWorkers() int
+	Kind() runtime.Object
+	Resource() string
+	ClientSet() *kubernetes.Clientset
 }
 
-// NewHandler creates a new Handler.
-func NewHandler(
-	name string,
-	resource string,
-	namespace string,
-	kind runtime.Object,
-	restClient rest.Interface,
-	workers int,
-	onAddedUpdatedFuncs []OnAddedUpdatedFunc,
-	onDeletedFuncs []OnDeletedFunc,
-) *Handler {
+type onAddedUpdatedFunc func(key string, obj any) error
+type onDeletedFunc func(key string) error
 
-	h := &Handler{
-		name:                name,
-		resource:            resource,
-		kind:                kind,
-		indexer:             nil,
-		queue:               nil,
-		informer:            nil,
-		restClient:          restClient,
-		workers:             0,
-		onAddedUpdatedFuncs: onAddedUpdatedFuncs,
-		onDeletedFuncs:      onDeletedFuncs,
-		selector:            nil,
+type baseHandler struct {
+	name               string
+	resource           string
+	kind               runtime.Object
+	indexer            cache.Indexer
+	queue              workqueue.RateLimitingInterface
+	informer           cache.Controller
+	clientset          *kubernetes.Clientset
+	workers            int
+	onAddedUpdatedFunc onAddedUpdatedFunc
+	onDeletedFunc      onDeletedFunc
+	selector           labels.Selector
+}
+
+// newBaseHandler creates a new baseHandler.
+func newBaseHandler(hi handlerService) *baseHandler {
+
+	h := &baseHandler{
+		name:               hi.Name(),
+		resource:           hi.Resource(),
+		kind:               hi.Kind(),
+		indexer:            nil,
+		queue:              nil,
+		informer:           nil,
+		clientset:          hi.ClientSet(),
+		workers:            hi.GetWorkers(),
+		onAddedUpdatedFunc: hi.OnAddedUpdated,
+		onDeletedFunc:      hi.OnDeleted,
+		selector:           nil,
 	}
+	lbl := h.Selector().String()
 
 	optionsModifier := func(options *metav1.ListOptions) {
-		options.LabelSelector = h.Selector().String()
+		options.LabelSelector = lbl
 	}
 
-	listWatcher := cache.NewFilteredListWatchFromClient(restClient, resource, namespace, optionsModifier)
+	listWatcher := cache.NewFilteredListWatchFromClient(
+		hi.ClientSet().CoreV1().RESTClient(),
+		hi.Resource(),
+		hi.Namespace(),
+		optionsModifier,
+	)
 
 	// setup queue
 	queue := workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
 	h.queue = queue
 
 	// setup informer and indexer
-	indexer, informer := cache.NewIndexerInformer(listWatcher, kind, resyncPeriod, cache.ResourceEventHandlerFuncs{
+	indexer, informer := cache.NewIndexerInformer(listWatcher, hi.Kind(), reSyncPeriod, cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj any) {
 			key, err := cache.MetaNamespaceKeyFunc(obj)
 			if err == nil {
@@ -102,15 +110,14 @@ func NewHandler(
 	h.indexer = indexer
 
 	// setup workers
-	if workers <= 0 {
-		workers = defaultWorkers
+	if h.workers <= 0 {
+		h.workers = defaultWorkers
 	}
-	h.workers = workers
 
 	return h
 }
 
-func (h *Handler) processNextItem() bool {
+func (h *baseHandler) processNextItem() bool {
 	// Wait until there is a new item in the working queue
 	key, quit := h.queue.Get()
 	if quit {
@@ -128,10 +135,10 @@ func (h *Handler) processNextItem() bool {
 	return true
 }
 
-// process is the business logic of the handler. In this handler it simply prints
+// process is the business logic of the baseHandler. In this baseHandler it simply prints
 // information about the pod to stdout. In case an error happened, it has to simply return the error.
 // The retry logic should not be part of the business logic.
-func (h *Handler) processBusiness(key string) error {
+func (h *baseHandler) processBusiness(key string) error {
 	obj, exists, err := h.indexer.GetByKey(key)
 	if err != nil {
 		klog.Errorf("fetching object with key %s from store failed with %v", key, err)
@@ -141,34 +148,17 @@ func (h *Handler) processBusiness(key string) error {
 	if !exists {
 		// Below we will warm up our cache with a Obj, so that we will see a delete for one Obj
 		klog.Infof("deleting object: %s", key)
-		if len(h.onDeletedFuncs) == 0 {
-			klog.Infof("onDeletedFuncs is empty, skip.")
-			return nil
-		}
-		for _, fn := range h.onDeletedFuncs {
-			if err := fn(key); err != nil {
-				return err
-			}
-		}
-		return nil
+		return h.onDeletedFunc(key)
 	} else {
 		// Note that you also have to check the uid if you have a local controlled resource, which
 		// is dependent on the actual instance, to detect that a Pod was recreated with the same name
 		klog.Infof("sync/add/update for object: %s", key)
-		if len(h.onAddedUpdatedFuncs) == 0 {
-			klog.Info("onAddedUpdatedFuncs is empty, skip.")
-		}
-		for _, fn := range h.onAddedUpdatedFuncs {
-			if err := fn(key, obj); err != nil {
-				return err
-			}
-		}
-		return nil
+		return h.onAddedUpdatedFunc(key, obj)
 	}
 }
 
 // handleErr checks if an error happened and makes sure we will retry later.
-func (h *Handler) handleErr(err error, key interface{}) {
+func (h *baseHandler) handleErr(err error, key interface{}) {
 	if err == nil {
 		// Forget about the #AddRateLimited history of the key on every successful synchronization.
 		// This ensures that future processing of updates for this key is not delayed because of
@@ -177,7 +167,7 @@ func (h *Handler) handleErr(err error, key interface{}) {
 		return
 	}
 
-	// This handler retries 5 times if something goes wrong. After that, it stops trying.
+	// This baseHandler retries 5 times if something goes wrong. After that, it stops trying.
 	if h.queue.NumRequeues(key) < 5 {
 		klog.Infof("error syncing obj %v: %v", key, err)
 
@@ -193,13 +183,13 @@ func (h *Handler) handleErr(err error, key interface{}) {
 	klog.Infof("dropping obj %q out of the queue: %v", key, err)
 }
 
-func (h *Handler) runWorker() {
+func (h *baseHandler) runWorker() {
 	for h.processNextItem() {
 	}
 }
 
 // Run begins watching and syncing.
-func (h *Handler) Run(stopCh chan struct{}) {
+func (h *baseHandler) Run(stopCh chan struct{}) {
 	defer utilruntime.HandleCrash()
 
 	// Let the workers stop when we are done
@@ -219,10 +209,10 @@ func (h *Handler) Run(stopCh chan struct{}) {
 	}
 
 	<-stopCh
-	klog.Infof("stopping %s handler", h.name)
+	klog.Infof("stopping %s baseHandler", h.name)
 }
 
-func (h *Handler) Selector() labels.Selector {
+func (h *baseHandler) Selector() labels.Selector {
 	if h.selector != nil {
 		return h.selector
 	}
