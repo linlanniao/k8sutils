@@ -18,7 +18,7 @@ func TestCreateDeletePod(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: ns,
 			Labels: map[string]string{
-				"handler.k8sutils.ppops.cn/pods": "banana",
+				"controller.k8sutils.ppops.cn/pods": "banana",
 			},
 		},
 		Spec: corev1.PodSpec{

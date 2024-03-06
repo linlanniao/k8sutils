@@ -29,12 +29,12 @@ var (
 )
 
 type manager struct {
-	clientset    *k8sutils.Clientset
-	taskTacker   *sync.Map
-	podTacker    *sync.Map
-	controller   *controller.Controller
-	taskStorage  ITaskStorage
-	taskCallback ITaskCallback
+	clientset      *k8sutils.Clientset
+	taskTacker     *sync.Map
+	podTacker      *sync.Map
+	mainController *controller.MainController
+	taskStorage    ITaskStorage
+	taskCallback   ITaskCallback
 }
 
 func Manager() *manager {
@@ -49,9 +49,9 @@ func Manager() *manager {
 	return singleMgr
 }
 
-func (m *manager) SetController(iTaskSvc ITaskService) error {
+func (m *manager) InitController(iTaskSvc ITaskService) error {
 	// skip init if already inited
-	if m.controller != nil {
+	if m.mainController != nil {
 		return errors.New("already inited")
 	}
 
@@ -67,8 +67,8 @@ func (m *manager) SetController(iTaskSvc ITaskService) error {
 		m.clientset,
 	)
 
-	// init controller
-	m.controller = controller.NewController(controller.WithHandlers(podHandler))
+	// init mainController
+	m.mainController = controller.NewController(controller.WithHandlers(podHandler))
 
 	return nil
 }
@@ -237,6 +237,22 @@ func (m *manager) GetTrackingTask(key string) (*Task, error) {
 	return task, nil
 }
 
+// GetTrackingPod returns the pod with the given key from the tracking map.
+// If the pod does not exist, an error is returned.
+func (m *manager) GetTrackingPod(key string) (*corev1.Pod, error) {
+	val, ok := m.podTacker.Load(key)
+	if !ok {
+		return nil, fmt.Errorf("key %s not found in tracking map", key)
+	}
+
+	pod, ok := val.(*corev1.Pod)
+	if !ok {
+		return nil, fmt.Errorf("value of key %s is not a Pod", key)
+	}
+
+	return pod, nil
+}
+
 // CleanupTask deletes all the resources created for the task.
 func (m *manager) CleanupTask(ctx context.Context, task *Task) (err error) {
 	matchLabels := m.LabelDefault()
@@ -270,11 +286,11 @@ func (m *manager) CleanupTask(ctx context.Context, task *Task) (err error) {
 	return nil
 }
 
-// Start starts the controller.
+// Start starts the mainController.
 func (m *manager) Start(ctx context.Context) error {
-	if m.controller == nil {
-		return errors.New("controller not inited")
+	if m.mainController == nil {
+		return errors.New("mainController not inited")
 	}
 
-	return m.controller.Start(ctx)
+	return m.mainController.Run(ctx)
 }

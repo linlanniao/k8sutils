@@ -26,7 +26,7 @@ func createPod() (string, error) {
 			Name:      name,
 			Namespace: ns,
 			Labels: map[string]string{
-				"handler.k8sutils.ppops.cn/pods": "banana",
+				"controller.k8sutils.ppops.cn/pods": "banana",
 			},
 		},
 		Spec: corev1.PodSpec{
@@ -77,9 +77,9 @@ func TestNewPodHandler(t *testing.T) {
 	)
 
 	c := controller.NewController()
-	c.AddHandler(ph)
+	c.AddController(ph)
 	go func() {
-		err := c.Start(context.Background())
+		err := c.Run(context.Background())
 		assert.NoError(t, err)
 	}()
 

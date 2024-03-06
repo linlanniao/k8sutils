@@ -28,7 +28,7 @@ func NewPodHandler(
 	onAddedUpdatedFunc PodOnAddedUpdatedFunc,
 	onDeletedFunc PodOnDeletedFunc,
 	clientset *k8sutils.Clientset,
-) Handler {
+) Controller {
 	ph := &PodHandler{
 		name:               name,
 		clientset:          clientset,
@@ -38,11 +38,11 @@ func NewPodHandler(
 		onDeletedFunc:      onDeletedFunc,
 	}
 
-	h := newBaseHandler(ph)
+	h := newController(ph)
 	return h
 }
 
-var _ handlerService = (*PodHandler)(nil) // check if PodHandler implements the handlerService interface
+var _ handler = (*PodHandler)(nil) // check if PodHandler implements the handler interface
 
 func (p PodHandler) Namespace() string {
 	return p.namespace
