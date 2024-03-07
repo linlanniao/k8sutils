@@ -10,8 +10,11 @@ import (
 	"github.com/linlanniao/k8sutils/controller"
 	"github.com/linlanniao/k8sutils/kbatch/template"
 	"github.com/linlanniao/k8sutils/validate"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/cache"
+	"k8s.io/klog/v2"
 )
 
 const (
@@ -26,6 +29,9 @@ const (
 var (
 	singleMgr     *manager
 	singleMgrOnce sync.Once
+
+	ErrKeyNotFound       = errors.New("key not found")
+	ErrValueTypeMismatch = errors.New("value type mismatch")
 )
 
 type manager struct {
@@ -37,6 +43,7 @@ type manager struct {
 	taskCallback   ITaskCallback
 }
 
+// Manager returns the single instance of manager
 func Manager() *manager {
 	singleMgrOnce.Do(func() {
 		singleMgr = &manager{
@@ -49,6 +56,7 @@ func Manager() *manager {
 	return singleMgr
 }
 
+// InitController initializes the controller
 func (m *manager) InitController(iTaskSvc ITaskService) error {
 	// skip init if already inited
 	if m.mainController != nil {
@@ -73,75 +81,217 @@ func (m *manager) InitController(iTaskSvc ITaskService) error {
 	return nil
 }
 
+// SetTaskStorage sets the task storage
 func (m *manager) SetTaskStorage(iTaskStorage ITaskStorage) {
 	m.taskStorage = iTaskStorage
 }
+
+// SetTaskCallback sets the task callback
 func (m *manager) SetTaskCallback(iTaskCallback ITaskCallback) {
 	m.taskCallback = iTaskCallback
 }
 
-func (m *manager) onPodAdded() (ctx context.Context, pod *corev1.Pod) {
-	// TODO
-	panic("implement me")
+// UpdateTaskFromPod updates the task status based on the pod status.
+// TODO task MaxRetry is not 0, how to retry ?
+//
+//	if retrying ?? how to deal with it?
+func (m *manager) updateTaskFromPod(pod *corev1.Pod) error {
+	// get taskName from label
+	taskName, err := getTaskNameFromPod(pod)
+	if err != nil {
+		return err
+	}
+
+	// get task from taskTacker
+	taskKey := pod.GetNamespace() + "/" + taskName
+	task, err := m.GetTrackingTask(taskKey)
+	if err != nil {
+		return fmt.Errorf("task %s not found", taskKey)
+	}
+
+	// update task status
+	switch pod.Status.Phase {
+	case corev1.PodPending, corev1.PodRunning:
+		task.Status.Active += 1
+
+	case corev1.PodSucceeded:
+		task.Status.Succeeded += 1
+		if task.Status.Conditions == nil {
+			task.Status.Conditions = make([]batchv1.JobCondition, 0)
+		}
+		task.Status.Conditions = append(task.Status.Conditions, batchv1.JobCondition{
+			Type:               batchv1.JobComplete,
+			Status:             corev1.ConditionTrue,
+			LastProbeTime:      metav1.Now(),
+			LastTransitionTime: metav1.Now(),
+			Reason:             pod.Status.Reason,
+			Message:            pod.Status.Message,
+		})
+
+		completionTime := metav1.Now()
+		task.Status.CompletionTime = &completionTime
+
+	case corev1.PodFailed:
+		task.Status.Failed += 1
+		if task.Status.Conditions == nil {
+			task.Status.Conditions = make([]batchv1.JobCondition, 0)
+		}
+
+		var (
+			reason  string
+			message string
+		)
+
+		// try to get reason and message from container status
+		if len(pod.Status.ContainerStatuses) > 0 {
+			for _, c := range pod.Status.ContainerStatuses {
+				if c.Name == template.PodContainerNormalName || c.Name == template.PodContainerNsenterName {
+					if c.State.Terminated != nil {
+						reason = c.State.Terminated.Reason
+						message = c.State.Terminated.Message
+						break
+					}
+				}
+			}
+		}
+		if len(reason) == 0 {
+			reason = pod.Status.Reason
+		}
+		if len(message) == 0 {
+			message = pod.Status.Message
+		}
+
+		task.Status.Conditions = append(task.Status.Conditions, batchv1.JobCondition{
+			Type:               batchv1.JobComplete,
+			Status:             corev1.ConditionFalse,
+			LastProbeTime:      metav1.Now(),
+			LastTransitionTime: metav1.Now(),
+			Reason:             reason,
+			Message:            message,
+		})
+	}
+
+	// update task to taskTacker
+	if err = m.storeTackingTask(task); err != nil {
+		return err
+	}
+
+	// storage task
+	if m.taskStorage != nil {
+		if _, err = m.taskStorage.Update(context.Background(), task); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// onPodAdded handles the pod added event
+func (m *manager) onPodAdded(pod *corev1.Pod) (err error) {
+	if pod == nil {
+		return errors.New("pod is nil")
+	}
 
 	// add pod to podTacker
+	if err := m.storeTrackingPod(pod); err != nil {
+		return err
+	}
 
-	// get taskName from label
+	defer func() {
+		if err != nil {
+			_ = m.deleteTrackingPod(pod)
+		}
+	}()
 
-	// get task from taskTacker
-
-	// update task Status
-
-	// update task to taskStorage
-
-	// update task in taskTacker
-
+	// update task from pod
+	return m.updateTaskFromPod(pod)
 }
 
-func (m *manager) onPodUpdated() (ctx context.Context, pod *corev1.Pod) {
-	// TODO
-	panic("implement me")
+// onPodUpdated handles the pod updated event
+func (m *manager) onPodUpdated(oldPod, newPod *corev1.Pod) (err error) {
+	if oldPod == nil || newPod == nil {
+		return errors.New("pod is nil")
+	}
 
-	// get tackingPod from podTacker
+	// skip if phase is the same
+	if oldPod.Status.Phase == newPod.Status.Phase {
+		return nil
+	}
 
-	// if tackingPod.status.Phase ==  pod.status.Phase -- > do nothing
+	// update pod to podTacker
+	if err := m.storeTrackingPod(newPod); err != nil {
+		return err
+	}
 
-	// get taskName from label
-
-	// get task from taskTacker
-
-	// update task Status
-
-	// update task to taskStorage
-
-	// update task in taskTacker
+	// update task from pod
+	return m.updateTaskFromPod(newPod)
 }
 
-func (m *manager) onPodDeleted() (ctx context.Context, pod *corev1.Pod) {
-	// TODO
-	panic("implement me")
+// onPodAddUpdated handles the pod added or updated event
+func (m *manager) onPodAddUpdated(pod *corev1.Pod) {
+	key, err := cache.MetaNamespaceKeyFunc(pod)
+	if err != nil {
+		klog.Errorf("failed to get key for pod %s/%s: %v", pod.GetNamespace(), pod.GetName(), err)
+	}
 
-	// get tackingPod from podTacker
+	oldPod, err := m.getTrackingPod(key)
+	if err != nil {
+		if errors.Is(err, ErrKeyNotFound) {
+			// pod not found, add it to podTacker, and run onPodAdded
+
+			if err := m.onPodAdded(pod); err != nil {
+				klog.Errorf(err.Error())
+			}
+		} else {
+			// some other error ?
+			klog.Errorf("failed to get pod %s/%s: %v", pod.GetNamespace(), pod.GetName(), err)
+		}
+	} else {
+		// pod found, update it in podTacker, and run onPodUpdated
+
+		if err := m.onPodUpdated(oldPod, pod); err != nil {
+			klog.Errorf(err.Error())
+		}
+	}
+}
+
+// onPodDeleted handles the pod deleted event
+func (m *manager) onPodDeleted(pod *corev1.Pod) {
+	// get task name from pod label
+	taskName, err := getTaskNameFromPod(pod)
+	if err != nil {
+		err = fmt.Errorf("onPodDeleted: %w", err)
+		klog.Errorf(err.Error())
+		return
+	}
 
 	// get task from taskTacker
+	taskKey := pod.GetNamespace() + "/" + taskName
+	task, err := m.GetTrackingTask(taskKey)
+	if err != nil {
+		err = fmt.Errorf("onPodDeleted: %w", err)
+		klog.Errorf(err.Error())
+		return
+	}
+
+	// delete task from taskTacker, if task is done(succeeded or failed)
+	if len(task.Status.Conditions) > 0 {
+		if err := m.deleteTrackingPod(pod); err != nil {
+			klog.Errorf(err.Error())
+		}
+	}
 
 	// delete tackingPod from podTacker
-
-	// delete tackingTask from taskTacker
-
+	if err := m.deleteTrackingPod(pod); err != nil {
+		klog.Errorf(err.Error())
+	}
 }
 
-func (m *manager) onPodAddUpdated() (ctx context.Context, pod *corev1.Pod) {
-	// TODO
-	panic("implement me")
-	// if pod not in podTacker --> onPodAdded() else --> onPodUpdated()
-
-}
-
+// Clientset returns the clientset
 func (m *manager) Clientset() *k8sutils.Clientset {
 	return m.clientset
 }
 
+// LabelDefault returns the default label
 func (m *manager) LabelDefault() map[string]string {
 	return map[string]string{managerLabelKeyDefault: managerLabelValueDefault}
 }
@@ -160,13 +310,15 @@ func (m *manager) RunTask(ctx context.Context, task *Task) (err error) {
 	task.Status.StartTime = &now
 
 	// Add the task to the tracking map.
-	trackingKey := task.Namespace + "/" + task.Name
-	m.taskTacker.Store(trackingKey, task)
+	err = m.storeTackingTask(task)
+	if err != nil {
+		return err
+	}
 
 	// Defer a function that removes the task from the tracking map if the creation of the resources fails.
 	defer func() {
 		if err != nil {
-			m.taskTacker.Delete(trackingKey)
+			_ = m.deleteTrackingTask(task)
 		}
 	}()
 
@@ -216,7 +368,7 @@ func (m *manager) RunTask(ctx context.Context, task *Task) (err error) {
 	task, err = m.taskStorage.Create(ctx, task)
 
 	// update task tacker
-	m.taskTacker.Store(trackingKey, task)
+	err = m.storeTackingTask(task)
 
 	return nil
 }
@@ -226,31 +378,75 @@ func (m *manager) RunTask(ctx context.Context, task *Task) (err error) {
 func (m *manager) GetTrackingTask(key string) (*Task, error) {
 	val, ok := m.taskTacker.Load(key)
 	if !ok {
-		return nil, fmt.Errorf("key %s not found in tracking map", key)
+		return nil, fmt.Errorf("key: %s, err: %w", key, ErrKeyNotFound)
 	}
 
 	task, ok := val.(*Task)
 	if !ok {
-		return nil, fmt.Errorf("value of key %s is not a Task", key)
+		return nil, fmt.Errorf("key: %s, err: %w", key, ErrValueTypeMismatch)
 	}
 
 	return task, nil
 }
 
-// GetTrackingPod returns the pod with the given key from the tracking map.
+// storeTackingTask stores the task in the tracking map.
+func (m *manager) storeTackingTask(task *Task) error {
+	key, err := cache.MetaNamespaceKeyFunc(task)
+	if err != nil {
+		return err
+	}
+
+	m.taskTacker.Store(key, task)
+	return nil
+}
+
+// deleteTrackingTask deletes the task from the tracking map.
+func (m *manager) deleteTrackingTask(task *Task) error {
+	key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(task)
+	if err != nil {
+		return err
+	}
+
+	m.taskTacker.Delete(key)
+	return nil
+}
+
+// getTrackingPod returns the pod with the given key from the tracking map.
 // If the pod does not exist, an error is returned.
-func (m *manager) GetTrackingPod(key string) (*corev1.Pod, error) {
+func (m *manager) getTrackingPod(key string) (*corev1.Pod, error) {
 	val, ok := m.podTacker.Load(key)
 	if !ok {
-		return nil, fmt.Errorf("key %s not found in tracking map", key)
+		return nil, fmt.Errorf("key: %s, err: %w", key, ErrKeyNotFound)
 	}
 
 	pod, ok := val.(*corev1.Pod)
 	if !ok {
-		return nil, fmt.Errorf("value of key %s is not a Pod", key)
+		return nil, fmt.Errorf("key: %s, err: %w", key, ErrValueTypeMismatch)
 	}
 
 	return pod, nil
+}
+
+// storeTrackingPod stores the pod in the tracking map.
+func (m *manager) storeTrackingPod(pod *corev1.Pod) error {
+	key, err := cache.MetaNamespaceKeyFunc(pod)
+	if err != nil {
+		return err
+	}
+
+	m.podTacker.Store(key, pod)
+	return nil
+}
+
+// deleteTrackingPod deletes the pod from the tracking map.
+func (m *manager) deleteTrackingPod(pod *corev1.Pod) error {
+	key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(pod)
+	if err != nil {
+		return err
+	}
+
+	m.podTacker.Delete(key)
+	return nil
 }
 
 // CleanupTask deletes all the resources created for the task.
@@ -293,4 +489,20 @@ func (m *manager) Start(ctx context.Context) error {
 	}
 
 	return m.mainController.Run(ctx)
+}
+
+// getTaskNameFromPod returns the task name from the pod labels.
+// It returns an error if the pod has no labels or the task label does not exist.
+func getTaskNameFromPod(pod *corev1.Pod) (string, error) {
+	labels := pod.GetLabels()
+	if labels == nil {
+		return "", errors.New("pod has no labels")
+	}
+
+	value, ok := labels[taskLabelAddKey]
+	if !ok {
+		return "", errors.New("pod has no task label")
+	}
+
+	return value, nil
 }

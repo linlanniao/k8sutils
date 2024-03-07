@@ -42,14 +42,21 @@ func (t *Task) Validate() error {
 }
 
 type TaskSpec struct {
-	Image                   string            `json:"image"`
-	ScriptContent           string            `json:"scriptContent"`
-	ScriptType              ScriptType        `json:"scriptType"`
-	Privilege               *TaskPrivilege    `json:"privilege,omitempty"`
-	Parameters              *Parameters       `json:"parameters,omitempty"`
-	RetryTimes              *int32            `json:"retryTimes,omitempty"`
-	CoolDown                *int32            `json:"coolDown,omitempty"`
-	BackoffLimit            *int32            `json:"backoffLimit,omitempty"`
+	Image         string         `json:"image"`
+	ScriptContent string         `json:"scriptContent"`
+	ScriptType    ScriptType     `json:"scriptType"`
+	Privilege     *TaskPrivilege `json:"privilege,omitempty"`
+	Parameters    *Parameters    `json:"parameters,omitempty"`
+
+	// Specifies the number of retries before marking this task failed.
+	// Defaults to 0
+	// +optional
+	MaxRetries *int32 `json:"retryTimes,omitempty"`
+
+	// The interval between failed retries (seconds)
+	// Defaults to 10
+	CoolDown *int32 `json:"coolDown,omitempty"`
+
 	ActiveDeadlineSeconds   *int64            `json:"activeDeadlineSeconds,omitempty"`
 	TTLSecondsAfterFinished *int32            `json:"ttlSecondsAfterFinished,omitempty"`
 	NodeSelector            map[string]string `json:"nodeSelector,omitempty"`
@@ -81,16 +88,12 @@ func (ts *TaskSpec) Validate() error {
 		}
 	}
 
-	if ts.RetryTimes != nil && *ts.RetryTimes < 0 {
+	if ts.MaxRetries != nil && *ts.MaxRetries < 0 {
 		return errors.New("retryTimes cannot be negative")
 	}
 
 	if ts.CoolDown != nil && *ts.CoolDown < 0 {
 		return errors.New("coolDown cannot be negative")
-	}
-
-	if ts.BackoffLimit != nil && *ts.BackoffLimit < 0 {
-		return errors.New("backoffLimit cannot be negative")
 	}
 
 	// TODO ActiveDeadlineSeconds is not supported in this version
@@ -189,7 +192,7 @@ func WithParameters(parameters ...Parameter) TaskOption {
 
 func WithRetryTimes(retryTimes int32) TaskOption {
 	return func(task *Task) {
-		task.Spec.RetryTimes = &retryTimes
+		task.Spec.MaxRetries = &retryTimes
 	}
 }
 

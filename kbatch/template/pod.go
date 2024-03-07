@@ -21,8 +21,8 @@ const (
 	podLimitCPU              = "2000m"
 	podLimitMemory           = "2000Mi"
 
-	podContainerNormalName  = "runner"
-	podContainerNsenterName = "runner-nsenter"
+	PodContainerNormalName  = "runner"
+	PodContainerNsenterName = "runner-nsenter"
 	scriptContentMountPath  = "/tmp"
 
 	podEnvFromSecretOptional bool = true
@@ -127,7 +127,7 @@ func (p *PodTemplate) initPod() *PodTemplate {
 	p.pod.Spec.Containers = make([]corev1.Container, 1)
 	if !p.isPrivileged {
 		p.pod.Spec.Containers[0] = corev1.Container{
-			Name:       podContainerNormalName,
+			Name:       PodContainerNormalName,
 			Image:      p.image,
 			Command:    nil,
 			Args:       nil,
@@ -175,7 +175,7 @@ func (p *PodTemplate) initPod() *PodTemplate {
 	} else {
 		podNsenterSecurityContextPrivileged := true
 		p.pod.Spec.Containers[0] = corev1.Container{
-			Name:    podContainerNsenterName,
+			Name:    PodContainerNsenterName,
 			Image:   p.image,
 			Command: nil,
 			Args:    nil,
@@ -333,8 +333,8 @@ func (p *PodTemplate) SetScript(configMapRef *corev1.ConfigMap, dataKey string, 
 	// find runner container
 	var runnerContainer *corev1.Container
 	for idx := range p.pod.Spec.Containers {
-		if p.pod.Spec.Containers[idx].Name == podContainerNormalName ||
-			p.pod.Spec.Containers[idx].Name == podContainerNsenterName {
+		if p.pod.Spec.Containers[idx].Name == PodContainerNormalName ||
+			p.pod.Spec.Containers[idx].Name == PodContainerNsenterName {
 			runnerContainer = &p.pod.Spec.Containers[idx]
 			break
 		}
