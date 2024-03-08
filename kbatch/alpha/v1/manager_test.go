@@ -1,35 +1,35 @@
-package kbatch_test
+package v1_test
 
 import (
 	"context"
 	"testing"
 	"time"
 
-	"github.com/linlanniao/k8sutils/kbatch"
+	v12 "github.com/linlanniao/k8sutils/kbatch/alpha/v1"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestInitManager(t *testing.T) {
-	mgr := kbatch.Manager()
+	mgr := v12.Manager()
 	assert.NotNil(t, mgr)
-	mgr2 := kbatch.Manager()
+	mgr2 := v12.Manager()
 
 	// assert that mgr2 is the same as mgr
 	assert.Equal(t, mgr, mgr2)
 }
 
 func TestManager_RunTask(t *testing.T) {
-	mgr := kbatch.Manager()
+	mgr := v12.Manager()
 	assert.NotNil(t, mgr)
 
 	ns := "default"
 
-	task, err := kbatch.NewTask(
+	task, err := v12.NewTask(
 		"test-task",
 		ns,
 		"nginx",
 		"echo 'hello world'",
-		kbatch.ScriptTypeBash)
+		v12.ScriptTypeBash)
 	assert.NoError(t, err)
 	assert.NotNil(t, task)
 

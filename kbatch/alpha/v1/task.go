@@ -1,4 +1,4 @@
-package kbatch
+package v1
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/linlanniao/k8sutils/common"
-	"github.com/linlanniao/k8sutils/kbatch/template"
+	"github.com/linlanniao/k8sutils/kbatch/alpha/v1/template"
 	"github.com/linlanniao/k8sutils/validate"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -265,12 +265,19 @@ func NewTask(generateName, namespace, image, scriptContent string, scriptType Sc
 	return t, nil
 }
 
+type ITaskListParams struct {
+	Namespace *string `json:"namespace,optional"`
+	IsRunning *bool   `json:"is_running,optional"`
+	Limit     *int32  `json:"limit,optional"`
+	Offset    *int32  `json:"offset,optional"`
+}
+
 type ITaskStorage interface {
 	Get(ctx context.Context, name string) (*Task, error)
 	Create(ctx context.Context, task *Task) (*Task, error)
 	Update(ctx context.Context, task *Task) (*Task, error)
 	Delete(ctx context.Context, name string) error
-	List(ctx context.Context) ([]*Task, error)
+	List(ctx context.Context, param ITaskListParams) ([]*Task, error)
 }
 
 type ITaskCallback interface {

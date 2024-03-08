@@ -1,4 +1,4 @@
-package kbatch
+package v1
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 
 	"github.com/linlanniao/k8sutils"
 	"github.com/linlanniao/k8sutils/controller"
-	"github.com/linlanniao/k8sutils/kbatch/template"
+	"github.com/linlanniao/k8sutils/kbatch/alpha/v1/template"
 	"github.com/linlanniao/k8sutils/validate"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -19,7 +19,7 @@ import (
 
 const (
 	managerLabelKeyDefault   = "batch.k8sutils.ppops.cn/manager"
-	managerLabelValueDefault = "v1"
+	managerLabelValueDefault = "alpha-v1"
 
 	taskLabelAddKey = "batch.k8sutils.ppops.cn/task"
 
@@ -254,6 +254,145 @@ func (m *manager) onPodAddUpdated(pod *corev1.Pod) {
 	}
 }
 
+// TODO finish this function
+func (m *manager) onPodAddUpdated2(newPod *corev1.Pod) {
+	// if pod is nil, skip it
+	if newPod == nil {
+		klog.Errorf("invalid pod")
+		return
+	}
+
+	// try to get oldPod from podTacker, if not found, add it to podTacker
+	newPodKey, _ := cache.MetaNamespaceKeyFunc(newPod)
+
+	oldPod, err := m.getTrackingPod(newPodKey)
+	if err != nil {
+		if errors.Is(err, ErrKeyNotFound) {
+			// pod not found, add it to podTacker
+			if err := m.storeTrackingPod(newPod); err != nil {
+				klog.Errorf("podTracker err: %s", err.Error())
+				return
+			}
+		} else {
+			// some other error?
+			klog.Errorf("podTracker err: %s", err.Error())
+			return
+		}
+	}
+
+	// skip if phase is the same
+	if oldPod != nil && oldPod.Status.Phase == newPod.Status.Phase {
+		return
+	}
+
+	// update pod to podTacker
+	if err := m.storeTrackingPod(newPod); err != nil {
+		klog.Errorf("podTracker err: %s", err.Error())
+		return
+	}
+
+	// get taskName / taskKey from pod
+	taskName, err := getTaskNameFromPod(newPod)
+	if err != nil {
+		klog.Errorf(err.Error())
+		// no task label found, skip it
+		return
+	}
+	taskKey := newPod.GetNamespace() + "/" + taskName
+
+	// try to get task from taskTacker
+	//   if not found, try to query task from taskStorage
+	task, err := m.GetTrackingTask(taskKey)
+	if err != nil {
+		if errors.Is(err, ErrKeyNotFound) {
+			// task not found, try to query task from taskStorage
+			task, err = m.taskStorage.Get(context.Background(), taskName)
+			if err != nil {
+				klog.Errorf(err.Error())
+				return
+			}
+
+			// add task to taskTacker
+			if err := m.storeTackingTask(task); err != nil {
+				klog.Errorf(err.Error())
+				return
+			}
+
+		} else {
+			// some other error?
+			klog.Errorf(err.Error())
+			return
+		}
+	}
+
+	// operate according to status.
+	switch newPod.Status.Phase {
+	case corev1.PodPending:
+		task.Status.Active += 1
+
+	case corev1.PodRunning:
+		task.Status.Active += 1
+		// TODO
+
+	case corev1.PodSucceeded:
+		task.Status.Succeeded += 1
+		if task.Status.Conditions == nil {
+			task.Status.Conditions = make([]batchv1.JobCondition, 0)
+		}
+		task.Status.Conditions = append(task.Status.Conditions, batchv1.JobCondition{
+			Type:               batchv1.JobComplete,
+			Status:             corev1.ConditionTrue,
+			LastProbeTime:      metav1.Now(),
+			LastTransitionTime: metav1.Now(),
+			Reason:             newPod.Status.Reason,
+			Message:            newPod.Status.Message,
+		})
+
+		completionTime := metav1.Now()
+		task.Status.CompletionTime = &completionTime
+
+	case corev1.PodFailed:
+		task.Status.Failed += 1
+		if task.Status.Conditions == nil {
+			task.Status.Conditions = make([]batchv1.JobCondition, 0)
+		}
+
+		var (
+			reason  string
+			message string
+		)
+
+		// try to get reason and message from container status
+		if len(newPod.Status.ContainerStatuses) > 0 {
+			for _, c := range newPod.Status.ContainerStatuses {
+				if c.Name == template.PodContainerNormalName || c.Name == template.PodContainerNsenterName {
+					if c.State.Terminated != nil {
+						reason = c.State.Terminated.Reason
+						message = c.State.Terminated.Message
+						break
+					}
+				}
+			}
+		}
+		if len(reason) == 0 {
+			reason = newPod.Status.Reason
+		}
+		if len(message) == 0 {
+			message = newPod.Status.Message
+		}
+
+		task.Status.Conditions = append(task.Status.Conditions, batchv1.JobCondition{
+			Type:               batchv1.JobComplete,
+			Status:             corev1.ConditionFalse,
+			LastProbeTime:      metav1.Now(),
+			LastTransitionTime: metav1.Now(),
+			Reason:             reason,
+			Message:            message,
+		})
+	}
+
+}
+
 // onPodDeleted handles the pod deleted event
 func (m *manager) onPodDeleted(pod *corev1.Pod) {
 	// get task name from pod label
@@ -327,8 +466,7 @@ func (m *manager) RunTask(ctx context.Context, task *Task) (err error) {
 	newLabels[taskLabelAddKey] = task.GetName()
 
 	// Create a configmap template with the task information.
-	cmTmpl := template.
-		NewConfigMapTemplate(task.Name, task.Namespace, managerConfigMapScriptName, task.Spec.ScriptContent).
+	cmTmpl := template.NewConfigMapTemplate(task.Name, task.Namespace, managerConfigMapScriptName, task.Spec.ScriptContent).
 		SetLabels(newLabels)
 
 	// Try to validate the configmap template.
@@ -348,8 +486,7 @@ func (m *manager) RunTask(ctx context.Context, task *Task) (err error) {
 		isPrivileged = true
 	}
 
-	podTmpl := template.
-		NewPodTemplate(task.Name, task.Namespace, isPrivileged, task.Spec.Image).
+	podTmpl := template.NewPodTemplate(task.Name, task.Namespace, isPrivileged, task.Spec.Image).
 		SetLabels(newLabels).
 		SetScript(cmTmpl.ConfigMap(), managerConfigMapScriptName, task.Spec.ScriptType.AsExecutor())
 
@@ -483,12 +620,25 @@ func (m *manager) CleanupTask(ctx context.Context, task *Task) (err error) {
 }
 
 // Start starts the mainController.
+//
+//	TODO finish this function.
 func (m *manager) Start(ctx context.Context) error {
 	if m.mainController == nil {
 		return errors.New("mainController not inited")
 	}
 
+	// query tasks, filter tasks is Running.
+
+	// add task to taskTacker
+
+	// for loop forever, refactor with function?
+	//   1. get task from taskTacker, filter tasks that are not active
+	//   2. run task(create pod / create configmap)
+	//   3. sleep 5s
+
+	// run controller.
 	return m.mainController.Run(ctx)
+
 }
 
 // getTaskNameFromPod returns the task name from the pod labels.

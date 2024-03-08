@@ -1,4 +1,4 @@
-package kbatch
+package v1
 
 import (
 	"errors"
