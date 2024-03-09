@@ -9,7 +9,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-type PodOnAddedUpdatedFunc func(key string, obj *corev1.Pod) error
+type PodOnAddedUpdatedFunc func(key string, pod *corev1.Pod) error
 type PodOnDeletedFunc func(key string) error
 
 type PodHandler struct {

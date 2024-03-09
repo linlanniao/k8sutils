@@ -12,14 +12,14 @@ type Controller interface {
 	Namespace() string
 }
 
-type MainController struct {
+type MasterController struct {
 	controller []Controller
 }
 
-type Option func(*MainController)
+type Option func(*MasterController)
 
-func NewController(opts ...Option) *MainController {
-	c := &MainController{}
+func NewMasterController(opts ...Option) *MasterController {
+	c := &MasterController{}
 	for _, opt := range opts {
 		opt(c)
 	}
@@ -27,7 +27,7 @@ func NewController(opts ...Option) *MainController {
 }
 
 func WithHandlers(controllers ...Controller) Option {
-	return func(c *MainController) {
+	return func(c *MasterController) {
 		length := len(controllers)
 		if length == 0 {
 			return
@@ -41,11 +41,11 @@ func WithHandlers(controllers ...Controller) Option {
 	}
 }
 
-func (c *MainController) AddController(handler Controller) {
+func (c *MasterController) AddController(handler Controller) {
 	c.controller = append(c.controller, handler)
 }
 
-func (c *MainController) Run(ctx context.Context) error {
+func (c *MasterController) Run(ctx context.Context) error {
 	if len(c.controller) == 0 {
 		return fmt.Errorf("no handler")
 	}
@@ -69,4 +69,4 @@ func (c *MainController) Run(ctx context.Context) error {
 	}
 }
 
-// TODO MainController how to get the namespace?
+// TODO MasterController how to get the namespace?

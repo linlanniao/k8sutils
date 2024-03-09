@@ -38,7 +38,7 @@ type manager struct {
 	clientset      *k8sutils.Clientset
 	taskTacker     *sync.Map
 	podTacker      *sync.Map
-	mainController *controller.MainController
+	mainController *controller.MasterController
 	taskStorage    ITaskStorage
 	taskCallback   ITaskCallback
 }
@@ -76,7 +76,7 @@ func (m *manager) InitController(iTaskSvc ITaskService) error {
 	)
 
 	// init mainController
-	m.mainController = controller.NewController(controller.WithHandlers(podHandler))
+	m.mainController = controller.NewMasterController(controller.WithHandlers(podHandler))
 
 	return nil
 }

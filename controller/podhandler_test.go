@@ -76,7 +76,7 @@ func TestNewPodHandler(t *testing.T) {
 		k8sutils.GetClientset(),
 	)
 
-	c := controller.NewController()
+	c := controller.NewMasterController()
 	c.AddController(ph)
 	go func() {
 		err := c.Run(context.Background())
