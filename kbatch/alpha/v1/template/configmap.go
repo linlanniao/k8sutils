@@ -14,8 +14,8 @@ const (
 	cmNamespaceDefault    = corev1.NamespaceDefault
 )
 
-// ConfigMapTemplate creates a ConfigMap with a single key-value pair
-type ConfigMapTemplate struct {
+// configMapTemplate creates a ConfigMap with a single key-value pair
+type configMapTemplate struct {
 	configMap     *corev1.ConfigMap
 	name          string
 	generateName  string
@@ -24,14 +24,14 @@ type ConfigMapTemplate struct {
 	scriptContent string
 }
 
-// NewConfigMapTemplate creates a new ConfigMapTemplate instance
-func NewConfigMapTemplate(generateName, namespace, scriptName, scriptContent string) *ConfigMapTemplate {
+// NewConfigMapTemplate creates a new configMapTemplate instance
+func NewConfigMapTemplate(generateName, namespace, scriptName, scriptContent string) *configMapTemplate {
 
 	if !strings.HasSuffix(generateName, "-") {
 		generateName = generateName + "-"
 	}
 
-	c := &ConfigMapTemplate{
+	c := &configMapTemplate{
 		generateName:  generateName,
 		namespace:     namespace,
 		scriptName:    scriptName,
@@ -43,8 +43,8 @@ func NewConfigMapTemplate(generateName, namespace, scriptName, scriptContent str
 	return c
 }
 
-// Validate checks the validity of the ConfigMapTemplate instance
-func (c *ConfigMapTemplate) Validate() error {
+// Validate checks the validity of the configMapTemplate instance
+func (c *configMapTemplate) Validate() error {
 	if c.configMap == nil {
 		return errors.New("configMap is not initialized")
 	}
@@ -80,24 +80,24 @@ func (c *ConfigMapTemplate) Validate() error {
 }
 
 // ConfigMap returns the ConfigMap instance
-func (c *ConfigMapTemplate) ConfigMap() *corev1.ConfigMap {
+func (c *configMapTemplate) ConfigMap() *corev1.ConfigMap {
 	return c.configMap
 }
 
 // Name returns the name of the ConfigMap
-func (c *ConfigMapTemplate) Name() string {
+func (c *configMapTemplate) Name() string {
 	return c.name
 }
 
 // Namespace returns the namespace of the ConfigMap
-func (c *ConfigMapTemplate) Namespace() string {
+func (c *configMapTemplate) Namespace() string {
 	return c.namespace
 }
 
 // initConfigMap initializes the ConfigMap instance if it is not already initialized.
 // It sets default values for the generateName and namespace fields, and generates a unique name for the ConfigMap.
 // It also initializes the Data field with the script content.
-func (c *ConfigMapTemplate) initConfigMap() *ConfigMapTemplate {
+func (c *configMapTemplate) initConfigMap() *configMapTemplate {
 	// skip if configmap is already initialized
 	if c.configMap != nil {
 		return c
@@ -125,22 +125,22 @@ func (c *ConfigMapTemplate) initConfigMap() *ConfigMapTemplate {
 	return c
 }
 
-// SetLabels sets the labels of the ConfigMapTemplate.
+// SetLabels sets the labels of the configMapTemplate.
 //
 // This function initializes the ConfigMap instance if it is not already initialized.
-// It then sets the labels on the ConfigMap instance and returns the ConfigMapTemplate instance.
-func (c *ConfigMapTemplate) SetLabels(labels map[string]string) *ConfigMapTemplate {
+// It then sets the labels on the ConfigMap instance and returns the configMapTemplate instance.
+func (c *configMapTemplate) SetLabels(labels map[string]string) *configMapTemplate {
 	c.initConfigMap()
 
 	c.configMap.SetLabels(labels)
 	return c
 }
 
-// SetLabel sets the value of a label on the ConfigMapTemplate.
+// SetLabel sets the value of a label on the configMapTemplate.
 //
 // This function initializes the ConfigMap instance if it is not already initialized.
-// It then sets the label on the ConfigMap instance and returns the ConfigMapTemplate instance.
-func (c *ConfigMapTemplate) SetLabel(key string, value string) *ConfigMapTemplate {
+// It then sets the label on the ConfigMap instance and returns the configMapTemplate instance.
+func (c *configMapTemplate) SetLabel(key string, value string) *configMapTemplate {
 	c.initConfigMap()
 
 	if c.configMap.Labels == nil {

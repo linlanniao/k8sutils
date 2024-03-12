@@ -1,9 +1,10 @@
-package template
+package builders
 
 import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/linlanniao/k8sutils/common"
@@ -30,6 +31,9 @@ const (
 
 	jobGenerateNameDefault = "runner-"
 	jobNamespaceDefault    = corev1.NamespaceDefault
+
+	jobImageDefault = "alpine:3.19.1"
+	jobArgsDefault  = "echo not_set_yet"
 )
 
 var (
@@ -44,15 +48,18 @@ var (
 type ScriptExecutor string
 
 const (
+	scriptExecutorSh     ScriptExecutor = "sh"
 	scriptExecutorBash   ScriptExecutor = "bash"
 	scriptExecutorPython ScriptExecutor = "python"
+
+	scriptExecutorDefault ScriptExecutor = scriptExecutorSh // if not set, default to sh
 )
 
 func (s ScriptExecutor) String() string {
 	return string(s)
 }
 
-type jobTemplate struct {
+type jobBuilder struct {
 	job              *batchv1.Job
 	name             string
 	generateName     string
@@ -66,8 +73,8 @@ type jobTemplate struct {
 }
 
 // initJob initializes the job if it hasn't been initialized yet.
-// It returns the jobTemplate instance.
-func (j *jobTemplate) initJob() *jobTemplate {
+// It returns the jobBuilder instance.
+func (j *jobBuilder) initJob() *jobBuilder {
 	// skip if job is already initialized
 	if j.job != nil {
 		return j
@@ -83,6 +90,15 @@ func (j *jobTemplate) initJob() *jobTemplate {
 		j.generateName = jobGenerateNameDefault
 	}
 	j.name = common.GenerateName2Name(j.generateName)
+	if len(j.image) == 0 {
+		j.image = jobImageDefault
+	}
+	if len(j.scriptExecutor.String()) == 0 {
+		j.scriptExecutor = scriptExecutorDefault
+	}
+	if len(j.args) == 0 {
+		j.args = []string{jobArgsDefault}
+	}
 
 	// init job metadata
 	j.job.ObjectMeta = metav1.ObjectMeta{
@@ -223,16 +239,41 @@ func (j *jobTemplate) initJob() *jobTemplate {
 		}
 	}
 
+	// init commands and args
+	for i, c := range j.job.Spec.Template.Spec.Containers {
+		if c.Name == JobContainerNormalName || c.Name == JobContainerNsenterName {
+			// set command
+			if !j.isPrivileged {
+				switch e := j.scriptExecutor; e {
+				case scriptExecutorBash, scriptExecutorDefault:
+					j.job.Spec.Template.Spec.Containers[i].Command = []string{e.String(), "-c"}
+				case scriptExecutorPython:
+					j.job.Spec.Template.Spec.Containers[i].Command = []string{e.String()}
+				}
+			} else {
+				j.job.Spec.Template.Spec.Containers[i].Command = []string{
+					"nsenter", "--target", "1", "--mount", "--uts", "--ipc", "--net", "--pid",
+					scriptExecutorDefault.String(), "-c",
+				}
+			}
+
+			// set args
+			j.job.Spec.Template.Spec.Containers[i].Args = slices.Clone(j.args)
+
+			break
+		}
+	}
+
 	return j
 
 }
 
-func (j *jobTemplate) Job() *batchv1.Job {
+func (j *jobBuilder) Job() *batchv1.Job {
 	return j.job
 }
 
-// Validate checks the validity of the job template.
-func (j *jobTemplate) Validate() error {
+// Validate checks the validity of the job builder.
+func (j *jobBuilder) Validate() error {
 	if j.job == nil {
 		return errors.New("job is not initialized")
 	}
@@ -273,10 +314,10 @@ func (j *jobTemplate) Validate() error {
 	return nil
 }
 
-// setScriptExecutor sets the script executor for the jobTemplate and initializes the script executor.
-// If the jobTemplate is not privileged, it sets the command for the container based on the script executor.
-// If the jobTemplate is privileged, it sets the command for the container to use nsenter with the script executor.
-func (j *jobTemplate) setScriptExecutor(executor ScriptExecutor) *jobTemplate {
+// setScriptExecutor sets the script executor for the jobBuilder and initializes the script executor.
+// If the jobBuilder is not privileged, it sets the command for the container based on the script executor.
+// If the jobBuilder is privileged, it sets the command for the container to use nsenter with the script executor.
+func (j *jobBuilder) setScriptExecutor(executor ScriptExecutor) *jobBuilder {
 	j.initJob()
 
 	j.scriptExecutor = executor
@@ -292,7 +333,7 @@ func (j *jobTemplate) setScriptExecutor(executor ScriptExecutor) *jobTemplate {
 
 	if !j.isPrivileged {
 		switch e := j.scriptExecutor; e {
-		case scriptExecutorBash:
+		case scriptExecutorBash, scriptExecutorDefault:
 			runnerContainer.Command = []string{e.String(), "-l"}
 		case scriptExecutorPython:
 			runnerContainer.Command = []string{e.String()}
@@ -300,7 +341,7 @@ func (j *jobTemplate) setScriptExecutor(executor ScriptExecutor) *jobTemplate {
 	} else {
 		runnerContainer.Command = []string{
 			"nsenter", "--target", "1", "--mount", "--uts", "--ipc", "--net", "--pid",
-			scriptExecutorBash.String(), "-l",
+			scriptExecutorDefault.String(), "-l",
 		}
 	}
 
@@ -308,7 +349,7 @@ func (j *jobTemplate) setScriptExecutor(executor ScriptExecutor) *jobTemplate {
 }
 
 // SetScript sets the script configmap and data key
-func (j *jobTemplate) SetScript(configMapRef *corev1.ConfigMap, dataKey string, executor ScriptExecutor) *jobTemplate {
+func (j *jobBuilder) SetScript(configMapRef *corev1.ConfigMap, dataKey string, executor ScriptExecutor) *jobBuilder {
 	j.initJob()
 
 	j.setScriptExecutor(executor)
@@ -317,7 +358,7 @@ func (j *jobTemplate) SetScript(configMapRef *corev1.ConfigMap, dataKey string, 
 		j.job.Spec.Template.Spec.Volumes = []corev1.Volume{}
 	}
 
-	// upsert to jobTemplate
+	// upsert to jobBuilder
 	j.scriptConfigMap = configMapRef
 	j.configMapDataKey = dataKey
 
@@ -378,22 +419,19 @@ func (j *jobTemplate) SetScript(configMapRef *corev1.ConfigMap, dataKey string, 
 		MountPath: scriptContentMountPath,
 	})
 
-	// setup args
-	if runnerContainer.Args == nil {
-		runnerContainer.Args = []string{}
-	}
+	// replace args
 
 	// add script path
 	scriptFullPath := filepath.Join(scriptContentMountPath, scriptName)
-	runnerContainer.Args = append(runnerContainer.Args, scriptFullPath)
+	runnerContainer.Args = []string{scriptFullPath}
 
 	// add extra args
-	runnerContainer.Args = append(runnerContainer.Args, j.args...)
+	runnerContainer.Args = append(runnerContainer.Args, slices.Clone(j.args)...)
 
 	return j
 }
 
-// NewPodTemplate creates a new jobTemplate instance.
+// JobBuilder creates a new jobBuilder instance.
 //
 // Args:
 // generateName: the generate name of the job.
@@ -402,13 +440,13 @@ func (j *jobTemplate) SetScript(configMapRef *corev1.ConfigMap, dataKey string, 
 // image: the image of the job.
 //
 // Returns:
-// a new jobTemplate instance.
-func NewPodTemplate(generateName string, namespace string, isPrivileged bool, image string) *jobTemplate {
+// a new jobBuilder instance.
+func JobBuilder(generateName string, namespace string, isPrivileged bool, image string) *jobBuilder {
 	if !strings.HasSuffix(generateName, "-") {
 		generateName = generateName + "-"
 	}
 
-	t := &jobTemplate{generateName: generateName, namespace: namespace, isPrivileged: isPrivileged, image: image}
+	t := &jobBuilder{generateName: generateName, namespace: namespace, isPrivileged: isPrivileged, image: image}
 
 	// initializes the job if it hasn't been initialized yet.
 	t.initJob()
@@ -422,7 +460,7 @@ func NewPodTemplate(generateName string, namespace string, isPrivileged bool, im
 // If the secret exists but some keys are missing or have empty values, the environment variables will be set with the default values.
 // If the secret exists and all keys have non-empty values, the environment variables will be set with the values from the secret.
 // If the secret exists and all keys have non-empty values, and some keys have empty values, the environment variables will be set with the values from the secret, except for the keys with empty values, which will be set with the default values.
-func (j *jobTemplate) SetGlobalConfigSecretName(name string) *jobTemplate {
+func (j *jobBuilder) SetGlobalConfigSecretName(name string) *jobBuilder {
 	j.initJob()
 
 	secretOptional := jobEnvFromSecretOptional
@@ -442,7 +480,7 @@ func (j *jobTemplate) SetGlobalConfigSecretName(name string) *jobTemplate {
 }
 
 // SetAnnotations sets the annotations of the job.
-func (j *jobTemplate) SetAnnotations(annotations map[string]string) *jobTemplate {
+func (j *jobBuilder) SetAnnotations(annotations map[string]string) *jobBuilder {
 	j.initJob()
 
 	j.job.SetAnnotations(annotations)
@@ -451,7 +489,7 @@ func (j *jobTemplate) SetAnnotations(annotations map[string]string) *jobTemplate
 }
 
 // SetLabels sets the labels of the job.
-func (j *jobTemplate) SetLabels(labels map[string]string) *jobTemplate {
+func (j *jobBuilder) SetLabels(labels map[string]string) *jobBuilder {
 	j.initJob()
 
 	j.job.SetLabels(labels)
@@ -460,7 +498,7 @@ func (j *jobTemplate) SetLabels(labels map[string]string) *jobTemplate {
 }
 
 // SetLabel sets the label of the job.
-func (j *jobTemplate) SetLabel(key string, value string) *jobTemplate {
+func (j *jobBuilder) SetLabel(key string, value string) *jobBuilder {
 	j.initJob()
 
 	// job label
@@ -479,7 +517,7 @@ func (j *jobTemplate) SetLabel(key string, value string) *jobTemplate {
 }
 
 // SetServiceAccountName sets the service account name of the job.
-func (j *jobTemplate) SetServiceAccountName(saName string) *jobTemplate {
+func (j *jobBuilder) SetServiceAccountName(saName string) *jobBuilder {
 	j.initJob()
 
 	j.job.Spec.Template.Spec.ServiceAccountName = saName
@@ -487,7 +525,7 @@ func (j *jobTemplate) SetServiceAccountName(saName string) *jobTemplate {
 }
 
 // SetName sets the name of the job.
-func (j *jobTemplate) SetName(name string) *jobTemplate {
+func (j *jobBuilder) SetName(name string) *jobBuilder {
 	j.initJob()
 
 	j.name = name
@@ -500,7 +538,7 @@ func (j *jobTemplate) SetName(name string) *jobTemplate {
 }
 
 // SetGenerateNameReGenerate sets the generateName and regenerates the name of the job.
-func (j *jobTemplate) SetGenerateNameReGenerate(generateName string) *jobTemplate {
+func (j *jobBuilder) SetGenerateNameReGenerate(generateName string) *jobBuilder {
 	j.initJob()
 
 	if !strings.HasSuffix(generateName, "-") {
@@ -514,7 +552,7 @@ func (j *jobTemplate) SetGenerateNameReGenerate(generateName string) *jobTemplat
 }
 
 // SetAffinity sets the affinity of the job.
-func (j *jobTemplate) SetAffinity(affinity *corev1.Affinity) *jobTemplate {
+func (j *jobBuilder) SetAffinity(affinity *corev1.Affinity) *jobBuilder {
 	j.initJob()
 
 	j.job.Spec.Template.Spec.Affinity = affinity
@@ -522,7 +560,7 @@ func (j *jobTemplate) SetAffinity(affinity *corev1.Affinity) *jobTemplate {
 }
 
 // SetTTLSecondsAfterFinished sets the TTLSecondsAfterFinished field of the Job.
-func (j *jobTemplate) SetTTLSecondsAfterFinished(ttl int32) *jobTemplate {
+func (j *jobBuilder) SetTTLSecondsAfterFinished(ttl int32) *jobBuilder {
 	j.job.Spec.TTLSecondsAfterFinished = &ttl
 	return j
 }
@@ -534,8 +572,8 @@ func (j *jobTemplate) SetTTLSecondsAfterFinished(ttl int32) *jobTemplate {
 // value: the value of the environment variable.
 //
 // Returns:
-// the jobTemplate instance.
-func (j *jobTemplate) AddEnv(name, value string) *jobTemplate {
+// the jobBuilder instance.
+func (j *jobBuilder) AddEnv(name, value string) *jobBuilder {
 	j.initJob()
 
 	name = strings.TrimSpace(name)
@@ -565,12 +603,12 @@ func (j *jobTemplate) AddEnv(name, value string) *jobTemplate {
 	return j
 }
 
-// Namespace returns the namespace of the jobTemplate.
-func (j *jobTemplate) Namespace() string {
+// Namespace returns the namespace of the jobBuilder.
+func (j *jobBuilder) Namespace() string {
 	return j.namespace
 }
 
-// Name returns the name of the jobTemplate.
-func (j *jobTemplate) Name() string {
+// Name returns the name of the jobBuilder.
+func (j *jobBuilder) Name() string {
 	return j.name
 }

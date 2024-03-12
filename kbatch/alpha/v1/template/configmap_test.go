@@ -19,7 +19,7 @@ func TestConfigMapTemplate_SetLabels(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			c := NewConfigMapTemplate("", "", "", "")
 			if got := c.SetLabels(tt.labels).ConfigMap().Labels; !reflect.DeepEqual(got, tt.labels) {
-				t.Errorf("ConfigMapTemplate.SetLabels() = %v, want %v", got, tt.labels)
+				t.Errorf("configMapTemplate.SetLabels() = %v, want %v", got, tt.labels)
 			}
 		})
 	}

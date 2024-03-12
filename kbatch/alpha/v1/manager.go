@@ -486,7 +486,7 @@ func (m *manager) RunTask(ctx context.Context, task *Task) (err error) {
 		isPrivileged = true
 	}
 
-	podTmpl := template.NewPodTemplate(task.Name, task.Namespace, isPrivileged, task.Spec.Image).
+	podTmpl := template.PodTemplate(task.Name, task.Namespace, isPrivileged, task.Spec.Image).
 		SetLabels(newLabels).
 		SetScript(cmTmpl.ConfigMap(), managerConfigMapScriptName, task.Spec.ScriptType.AsExecutor())
 
