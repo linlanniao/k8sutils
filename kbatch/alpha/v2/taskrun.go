@@ -44,6 +44,5 @@ type TaskRunSpec struct {
 }
 
 type TaskRunStatus struct {
-	Pod       *corev1.Pod       `json:"pod,omitempty"`       // if nil, the pod is not created
-	PodStatus *corev1.PodStatus `json:"podStatus,omitempty"` // if nil, the pod status is not created
+	Pod *corev1.Pod `json:"pod,omitempty"` // if nil, the pod is not created
 }

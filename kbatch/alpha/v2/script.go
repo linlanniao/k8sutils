@@ -1,6 +1,7 @@
 package v2
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/linlanniao/k8sutils/common"
@@ -13,12 +14,38 @@ import (
 type Script struct {
 	metav1.ObjectMeta `json:"metadata,omitempty" protobuf:"bytes,1,opt,name=metadata"`
 	Spec              ScriptSpec   `json:"spec"`
-	Status            scriptStatus `json:"status,omitempty"`
+	Status            ScriptStatus `json:"status,omitempty"`
+}
+
+func (s *Script) Validate() error {
+	if s.ObjectMeta.Name == "" {
+		return errors.New("name cannot be empty")
+	}
+
+	if s.ObjectMeta.Namespace == "" {
+		return errors.New("namespace cannot be empty")
+	}
+
+	if err := validate.Validate(s.Spec); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 type ScriptSpec struct {
 	Content  string         `json:"content"`
 	Executor ScriptExecutor `json:"executor"`
+}
+
+func (s *ScriptSpec) Validate() error {
+	if s.Content == "" {
+		return errors.New("content cannot be empty")
+	}
+	if err := validate.Validate(s.Executor); err != nil {
+		return err
+	}
+	return nil
 }
 
 type ScriptExecutor string
@@ -48,8 +75,9 @@ func (s ScriptExecutor) AsBuildersScriptExecutor() builders.ScriptExecutor {
 	return builders.ScriptExecutor(s)
 }
 
-type scriptStatus struct {
-	Configmap *corev1.ConfigMap `json:"configmap,omitempty"` // if nil, the configmap is not created
+type ScriptStatus struct {
+	Configmap          *corev1.ConfigMap `json:"configmap,omitempty"`
+	IsConfigmapApplied bool              `json:"isConfigmapApplied,omitempty"`
 }
 
 func NewScript(
@@ -76,35 +104,29 @@ func NewScript(
 
 type scriptOption func(s *Script)
 
-func WithAnnotations(annotations map[string]string) scriptOption {
+func WithScriptAnnotations(annotations map[string]string) scriptOption {
 	return func(s *Script) {
 		s.ObjectMeta.Annotations = annotations
 	}
 }
 
-func WithLabels(labels map[string]string) scriptOption {
+func WithScriptLabels(labels map[string]string) scriptOption {
 	return func(s *Script) {
 		s.ObjectMeta.Labels = labels
 	}
 }
 
-func (s *Script) Validate() error {
-	if err := s.Spec.Executor.Validate(); err != nil {
-		return err
-	}
-	return nil
-}
-
 const (
-	scriptNameLabelKey     = "v2.alpha.kbatch.k8sutils.ppops.cn/script-name"
-	scriptExecutorLabelKey = "v2.alpha.kbatch.k8sutils.ppops.cn/script-executor"
+	scriptNameLabelKey     = "v2.alpha.kbatch.k8sutils.ppops.cn/script"
+	scriptExecutorLabelKey = "v2.alpha.kbatch.k8sutils.ppops.cn/executor"
+	scriptConfigMapDataKey = "script"
 )
 
-func (s *Script) AsConfigMap() (*corev1.ConfigMap, error) {
+func (s *Script) GenerateConfigMap() (*corev1.ConfigMap, error) {
 	builder := builders.ConfigMapBuilder(
 		s.GetName(),
 		s.GetNamespace(),
-		"script",
+		scriptConfigMapDataKey,
 		s.Spec.Content,
 	)
 
@@ -124,5 +146,17 @@ func (s *Script) AsConfigMap() (*corev1.ConfigMap, error) {
 		return nil, err
 	}
 
-	return builder.ConfigMap(), nil
+	cm := builder.ConfigMap()
+
+	s.Status.Configmap = cm
+
+	return cm, nil
+}
+
+func (s *Script) ConfigMap() (*corev1.ConfigMap, error) {
+	if s.Status.Configmap == nil {
+		return nil, errors.New("configmap is not generated")
+	}
+
+	return s.Status.Configmap, nil
 }

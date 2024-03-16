@@ -51,11 +51,21 @@ func (ps Parameters) Len() int {
 	return len(ps)
 }
 
-func (ps Parameters) ToArgs() string {
+func (ps Parameters) ArgString() string {
 	var s string
 	for _, p := range ps {
 		p := p
 		s += p.Key + " " + p.Value + " "
 	}
 	return s
+}
+
+func (ps Parameters) Args() []string {
+	args := make([]string, 0, len(ps))
+	for _, p := range ps {
+		p := p
+		args = append(args, p.Key)
+		args = append(args, p.Value)
+	}
+	return args
 }

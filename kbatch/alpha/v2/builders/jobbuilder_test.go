@@ -38,7 +38,7 @@ func TestJobBuilder(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.generateName, func(t *testing.T) {
-			b := builders.JobBuilder(tt.generateName, tt.namespace, tt.isPrivileged, tt.image)
+			b := builders.JobBuilder(tt.generateName, tt.namespace, tt.isPrivileged, tt.image, nil)
 			j := b.Job()
 			assert.NotNil(t, j)
 			t.Logf("job name: %s", tt.generateName)

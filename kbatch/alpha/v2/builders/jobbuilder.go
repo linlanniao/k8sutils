@@ -65,7 +65,7 @@ type jobBuilder struct {
 	generateName     string
 	namespace        string
 	image            string
-	isPrivileged     bool
+	isNsenter        bool
 	scriptExecutor   ScriptExecutor
 	scriptConfigMap  *corev1.ConfigMap // script content config map
 	configMapDataKey string            // key for configmap.data field
@@ -96,9 +96,9 @@ func (j *jobBuilder) initJob() *jobBuilder {
 	if len(j.scriptExecutor.String()) == 0 {
 		j.scriptExecutor = scriptExecutorDefault
 	}
-	if len(j.args) == 0 {
-		j.args = []string{jobArgsDefault}
-	}
+	//if len(j.args) == 0 {
+	//	j.args = []string{}
+	//}
 
 	// init job metadata
 	j.job.ObjectMeta = metav1.ObjectMeta{
@@ -127,13 +127,13 @@ func (j *jobBuilder) initJob() *jobBuilder {
 		},
 		TTLSecondsAfterFinished: &jobPodTTLSecondsAfterFinished,
 	}
-	if j.isPrivileged {
+	if j.isNsenter {
 		j.job.Spec.Template.Spec.HostNetwork = true
 		j.job.Spec.Template.Spec.HostPID = true
 	}
 
 	// init volumes
-	if !j.isPrivileged {
+	if !j.isNsenter {
 		// The job with ordinary permission needs to mount the command of the host kubectl into the container.
 		j.job.Spec.Template.Spec.Volumes = []corev1.Volume{
 			{
@@ -159,7 +159,7 @@ func (j *jobBuilder) initJob() *jobBuilder {
 
 	// init containers
 	j.job.Spec.Template.Spec.Containers = make([]corev1.Container, 1)
-	if !j.isPrivileged {
+	if !j.isNsenter {
 		j.job.Spec.Template.Spec.Containers[0] = corev1.Container{
 			Name:       JobContainerNormalName,
 			Image:      j.image,
@@ -207,7 +207,7 @@ func (j *jobBuilder) initJob() *jobBuilder {
 			ImagePullPolicy: corev1.PullIfNotPresent,
 		}
 	} else {
-		podNsenterSecurityContextPrivileged := true
+		podNsenterSecurityContextNsenter := true
 		j.job.Spec.Template.Spec.Containers[0] = corev1.Container{
 			Name:    JobContainerNsenterName,
 			Image:   j.image,
@@ -231,7 +231,7 @@ func (j *jobBuilder) initJob() *jobBuilder {
 			},
 			ImagePullPolicy: corev1.PullIfNotPresent,
 			SecurityContext: &corev1.SecurityContext{
-				Privileged: &podNsenterSecurityContextPrivileged,
+				Privileged: &podNsenterSecurityContextNsenter,
 			},
 			Stdin:     true,
 			StdinOnce: true,
@@ -243,7 +243,7 @@ func (j *jobBuilder) initJob() *jobBuilder {
 	for i, c := range j.job.Spec.Template.Spec.Containers {
 		if c.Name == JobContainerNormalName || c.Name == JobContainerNsenterName {
 			// set command
-			if !j.isPrivileged {
+			if !j.isNsenter {
 				switch e := j.scriptExecutor; e {
 				case scriptExecutorBash, scriptExecutorDefault:
 					j.job.Spec.Template.Spec.Containers[i].Command = []string{e.String(), "-c"}
@@ -315,8 +315,8 @@ func (j *jobBuilder) Validate() error {
 }
 
 // setScriptExecutor sets the script executor for the jobBuilder and initializes the script executor.
-// If the jobBuilder is not privileged, it sets the command for the container based on the script executor.
-// If the jobBuilder is privileged, it sets the command for the container to use nsenter with the script executor.
+// If the jobBuilder is not nsenter, it sets the command for the container based on the script executor.
+// If the jobBuilder is nsenter, it sets the command for the container to use nsenter with the script executor.
 func (j *jobBuilder) setScriptExecutor(executor ScriptExecutor) *jobBuilder {
 	j.initJob()
 
@@ -331,7 +331,7 @@ func (j *jobBuilder) setScriptExecutor(executor ScriptExecutor) *jobBuilder {
 		}
 	}
 
-	if !j.isPrivileged {
+	if !j.isNsenter {
 		switch e := j.scriptExecutor; e {
 		case scriptExecutorBash, scriptExecutorDefault:
 			runnerContainer.Command = []string{e.String(), "-l"}
@@ -436,17 +436,17 @@ func (j *jobBuilder) SetScript(configMapRef *corev1.ConfigMap, dataKey string, e
 // Args:
 // generateName: the generate name of the job.
 // namespace: the namespace of the job.
-// isPrivileged: whether the job is privileged.
+// isNsenter: whether the job is nsenter.
 // image: the image of the job.
 //
 // Returns:
 // a new jobBuilder instance.
-func JobBuilder(generateName string, namespace string, isPrivileged bool, image string) *jobBuilder {
+func JobBuilder(generateName string, namespace string, isNsenter bool, image string, args []string) *jobBuilder {
 	if !strings.HasSuffix(generateName, "-") {
 		generateName = generateName + "-"
 	}
 
-	t := &jobBuilder{generateName: generateName, namespace: namespace, isPrivileged: isPrivileged, image: image}
+	t := &jobBuilder{generateName: generateName, namespace: namespace, isNsenter: isNsenter, image: image, args: args}
 
 	// initializes the job if it hasn't been initialized yet.
 	t.initJob()
@@ -516,8 +516,8 @@ func (j *jobBuilder) SetLabel(key string, value string) *jobBuilder {
 	return j
 }
 
-// SetServiceAccountName sets the service account name of the job.
-func (j *jobBuilder) SetServiceAccountName(saName string) *jobBuilder {
+// SetServiceAccount sets the service account name of the job.
+func (j *jobBuilder) SetServiceAccount(saName string) *jobBuilder {
 	j.initJob()
 
 	j.job.Spec.Template.Spec.ServiceAccountName = saName
@@ -559,9 +559,29 @@ func (j *jobBuilder) SetAffinity(affinity *corev1.Affinity) *jobBuilder {
 	return j
 }
 
+// SetNodeSelector sets the node selector of the job.
+func (j *jobBuilder) SetNodeSelector(nodeSelector map[string]string) *jobBuilder {
+	j.initJob()
+
+	j.job.Spec.Template.Spec.NodeSelector = nodeSelector
+	return j
+}
+
 // SetTTLSecondsAfterFinished sets the TTLSecondsAfterFinished field of the Job.
 func (j *jobBuilder) SetTTLSecondsAfterFinished(ttl int32) *jobBuilder {
 	j.job.Spec.TTLSecondsAfterFinished = &ttl
+	return j
+}
+
+// SetActiveDeadlineSeconds sets the ActiveDeadlineSeconds field of the Job.
+func (j *jobBuilder) SetActiveDeadlineSeconds(activeDeadlineSeconds int64) *jobBuilder {
+	j.job.Spec.ActiveDeadlineSeconds = &activeDeadlineSeconds
+	return j
+}
+
+// SetBackoffLimit sets the BackoffLimit field of the Job.
+func (j *jobBuilder) SetBackoffLimit(backoffLimit int32) *jobBuilder {
+	j.job.Spec.BackoffLimit = &backoffLimit
 	return j
 }
 

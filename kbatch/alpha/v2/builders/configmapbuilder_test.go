@@ -21,6 +21,7 @@ func TestConfigMapTemplate_SetLabels(t *testing.T) {
 			if got := c.SetLabels(tt.labels).ConfigMap().Labels; !reflect.DeepEqual(got, tt.labels) {
 				t.Errorf("configMapBuilder.SetLabels() = %v, want %v", got, tt.labels)
 			}
+			t.Log(c.ConfigMap().String())
 		})
 	}
 
