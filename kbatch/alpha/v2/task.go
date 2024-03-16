@@ -270,7 +270,7 @@ func (t *Task) GenerateJob(script *Script) (*batchv1.Job, error) {
 
 	// service account
 	if needsServiceAccount {
-		builder = builder.SetServiceAccount(K8sManagerSaName)
+		builder = builder.SetServiceAccount(K8sManagerSa)
 	}
 
 	// script

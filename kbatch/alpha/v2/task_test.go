@@ -128,9 +128,9 @@ kubectl get pod -A
 	cli := k8sutils.GetClientset()
 	ctx := context.Background()
 
-	saName := v2.K8sManagerSaName
-	clusterRoleName := v2.K8sManagerRoleName
-	clusterRoleBindingName := v2.K8sManagerRoleBindingName
+	saName := v2.K8sManagerSa
+	clusterRoleName := v2.K8sManagerClusterRole
+	clusterRoleBindingName := v2.K8sManagerClusterRoleBinding
 	rule := rbacv1.PolicyRule{
 		Verbs:           []string{"*"},
 		APIGroups:       []string{"*"},
