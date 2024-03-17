@@ -202,7 +202,7 @@ func WithTaskBackoffLimit(backoffLimit int32) taskOption {
 }
 
 const (
-	TaskNameLabelKey = "v2.alpha.kbatch.k8sutils.ppops.cn/task"
+	TaskNameLabelKey = "kbatch.k8sutils.ppops.cn/task"
 )
 
 func (t *Task) GenerateScript() (*Script, error) {
@@ -323,4 +323,40 @@ func (t *Task) GenerateJob(script *Script) (*batchv1.Job, error) {
 
 	t.Status.Job = builder.Job()
 	return t.Status.Job, nil
+}
+
+func (t *Task) SetLabel(key, value string) *Task {
+	if t.ObjectMeta.Labels == nil {
+		t.ObjectMeta.Labels = make(map[string]string)
+	}
+	t.ObjectMeta.Labels[key] = value
+	return t
+}
+
+func (t *Task) SetLabels(labels map[string]string) *Task {
+	if t.ObjectMeta.Labels == nil {
+		t.ObjectMeta.Labels = make(map[string]string)
+	}
+	for k, v := range labels {
+		t.ObjectMeta.Labels[k] = v
+	}
+	return t
+}
+
+func (t *Task) SetAnnotation(key, value string) *Task {
+	if t.ObjectMeta.Annotations == nil {
+		t.ObjectMeta.Annotations = make(map[string]string)
+	}
+	t.ObjectMeta.Annotations[key] = value
+	return t
+}
+
+func (t *Task) SetAnnotations(annotations map[string]string) *Task {
+	if t.ObjectMeta.Annotations == nil {
+		t.ObjectMeta.Annotations = make(map[string]string)
+	}
+	for k, v := range annotations {
+		t.ObjectMeta.Annotations[k] = v
+	}
+	return t
 }

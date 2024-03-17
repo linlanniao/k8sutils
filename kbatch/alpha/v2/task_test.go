@@ -138,8 +138,8 @@ kubectl get pod -A
 		NonResourceURLs: []string{"*"},
 	}
 	labels := map[string]string{
-		"v2.alpha.kbatch.k8sutils.ppops.cn/sa":        "k8s-manager",
-		"v2.alpha.kbatch.k8sutils.ppops.cn/privilege": "host-root",
+		"kbatch.k8sutils.ppops.cn/sa":        "k8s-manager",
+		"kbatch.k8sutils.ppops.cn/privilege": "host-root",
 	}
 	var err error
 	err = cli.ApplyServiceAccount(ctx, saName, labels)

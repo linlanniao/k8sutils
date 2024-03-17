@@ -117,8 +117,8 @@ func WithScriptLabels(labels map[string]string) scriptOption {
 }
 
 const (
-	scriptNameLabelKey     = "v2.alpha.kbatch.k8sutils.ppops.cn/script"
-	scriptExecutorLabelKey = "v2.alpha.kbatch.k8sutils.ppops.cn/executor"
+	scriptNameLabelKey     = "kbatch.k8sutils.ppops.cn/script"
+	scriptExecutorLabelKey = "kbatch.k8sutils.ppops.cn/executor"
 	scriptConfigMapDataKey = "script"
 )
 
