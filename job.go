@@ -10,6 +10,7 @@ import (
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
@@ -67,8 +68,24 @@ func (c *Clientset) WaitForJobActiveOrDone(ctx context.Context, namespace, jobNa
 }
 
 // ListJob lists Jobs
-func (c *Clientset) ListJob(ctx context.Context, namespace string) (*batchv1.JobList, error) {
-	return c.clientset.BatchV1().Jobs(namespace).List(ctx, metav1.ListOptions{})
+func (c *Clientset) ListJob(ctx context.Context, namespace string, selectedLabels map[string]string) (*batchv1.JobList, error) {
+	selector := labels.NewSelector()
+
+	if len(selectedLabels) > 0 {
+		for key, value := range selectedLabels {
+			req, err := labels.NewRequirement(key, selection.Equals, []string{value})
+			if err != nil {
+				return nil, fmt.Errorf("create label selector: %w", err)
+			}
+			selector = selector.Add(*req)
+		}
+	} else {
+		selector = labels.Everything()
+	}
+
+	return c.clientset.BatchV1().Jobs(namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: selector.String(),
+	})
 }
 
 // DeleteJob deletes a Job

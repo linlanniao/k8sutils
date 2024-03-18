@@ -350,7 +350,7 @@ func TestClient_GetPods(t *testing.T) {
 
 func TestClient_CreateDeleteJob(t *testing.T) {
 	kc := GetClientset()
-	currentJobs, err := kc.ListJob(testCtx, "default")
+	currentJobs, err := kc.ListJob(testCtx, "default", nil)
 	assert.NoError(t, err)
 	preJobNum := len(currentJobs.Items)
 
@@ -404,7 +404,7 @@ func TestClient_CreateDeleteJob(t *testing.T) {
 
 	//time.Sleep(1 * time.Second)
 
-	currentJobs, err = kc.ListJob(testCtx, "default")
+	currentJobs, err = kc.ListJob(testCtx, "default", nil)
 	assert.NoError(t, err)
 	assert.Equal(t, len(tests), len(currentJobs.Items)-preJobNum)
 
