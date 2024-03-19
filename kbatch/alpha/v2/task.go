@@ -1,6 +1,7 @@
 package v2
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -15,7 +16,7 @@ import (
 type Task struct {
 	metav1.ObjectMeta `json:"metadata,omitempty" protobuf:"bytes,1,opt,name=metadata"`
 	Spec              TaskSpec   `json:"spec"`
-	Status            TaskStatus `json:"status,omitempty"`
+	Status            TaskStatus `json:"-"`
 }
 
 func (t *Task) Validate() error {
@@ -242,7 +243,7 @@ func (t *Task) GenerateScript() (*Script, error) {
 	return t.Status.Script, nil
 }
 
-func (t *Task) GenerateJob(script *Script) (*batchv1.Job, error) {
+func (t *Task) GenerateJob() (*batchv1.Job, error) {
 	if err := t.Validate(); err != nil {
 		return nil, err
 	}
@@ -284,8 +285,9 @@ func (t *Task) GenerateJob(script *Script) (*batchv1.Job, error) {
 	builder.SetScript(cm, scriptConfigMapDataKey, t.Spec.ScriptSpec.Executor.AsBuildersScriptExecutor())
 
 	// annotations
-	if annotations := t.GetAnnotations(); len(annotations) > 0 {
-		builder.SetAnnotations(annotations)
+	t.SetContentToAnnotation()
+	if x := t.GetAnnotations(); len(x) > 0 {
+		builder.SetAnnotations(x)
 	}
 
 	// labels
@@ -322,6 +324,7 @@ func (t *Task) GenerateJob(script *Script) (*batchv1.Job, error) {
 	}
 
 	t.Status.Job = builder.Job()
+	//delete(t.Status.Job.Spec.Template.ObjectMeta.Annotations, TaskContentAnnotation) // do not recursion
 	return t.Status.Job, nil
 }
 
@@ -359,4 +362,38 @@ func (t *Task) SetAnnotations(annotations map[string]string) *Task {
 		t.ObjectMeta.Annotations[k] = v
 	}
 	return t
+}
+
+const (
+	TaskContentAnnotation = "kbatch.k8sutils.ppops.cn/task-content"
+)
+
+func (t *Task) SetContentToAnnotation() *Task {
+	if len(t.Annotations) > 0 {
+		delete(t.Annotations, TaskContentAnnotation)
+	}
+	b, err := json.Marshal(t)
+	if err != nil {
+		return t
+	}
+	content := string(b)
+	t.SetAnnotation(TaskContentAnnotation, content)
+	return t
+}
+
+func ParseTaskFromJob(job *batchv1.Job) (*Task, error) {
+	if job == nil {
+		return nil, errors.New("job is nil")
+	}
+	if job.ObjectMeta.Annotations == nil {
+		return nil, errors.New("job annotations is nil")
+	}
+	if job.ObjectMeta.Annotations[TaskContentAnnotation] == "" {
+		return nil, errors.New("task content is empty")
+	}
+	var task Task
+	if err := json.Unmarshal([]byte(job.ObjectMeta.Annotations[TaskContentAnnotation]), &task); err != nil {
+		return nil, err
+	}
+	return &task, nil
 }

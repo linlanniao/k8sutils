@@ -2,6 +2,7 @@ package v2_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	v2 "github.com/linlanniao/k8sutils/kbatch/alpha/v2"
 	"github.com/stretchr/testify/assert"
 	rbacv1 "k8s.io/api/rbac/v1"
+	"sigs.k8s.io/yaml"
 )
 
 func TestTask_GenerateScript(t *testing.T) {
@@ -27,7 +29,7 @@ echo "hello TestTask_GenerateScript"`,
 	assert.NoError(t, err)
 	assert.NotNil(t, cm)
 
-	job, err := task.GenerateJob(script)
+	job, err := task.GenerateJob()
 	assert.NoError(t, err)
 	assert.NotNil(t, job)
 
@@ -52,7 +54,7 @@ echo "hello TestTask_Apply"`,
 	assert.NoError(t, err)
 	assert.NotNil(t, cm)
 
-	job, err := task.GenerateJob(script)
+	job, err := task.GenerateJob()
 	assert.NoError(t, err)
 	assert.NotNil(t, job)
 
@@ -91,7 +93,7 @@ print(req.text)
 	assert.NoError(t, err)
 	assert.NotNil(t, cm)
 
-	job, err := task.GenerateJob(script)
+	job, err := task.GenerateJob()
 	assert.NoError(t, err)
 	assert.NotNil(t, job)
 
@@ -109,6 +111,28 @@ print(req.text)
 	_ = cli.DeleteJob(ctx, ns, job.GetName())
 	_ = cli.DeleteConfigMap(ctx, ns, cm.GetName())
 
+}
+
+func TestTask_toYaml(t *testing.T) {
+	task := v2.NewTask(
+		"test-pytask",
+		"default",
+		"nyurik/alpine-python3-requests",
+		`
+import requests
+req = requests.get("http://www.baidu.com")
+print(req.text)
+`,
+		v2.ScriptExecutorPython)
+	taskYaml, err := yaml.Marshal(task)
+	assert.NoError(t, err)
+	t.Log(string(taskYaml))
+	t.Log(len(taskYaml))
+
+	taskJson, err := json.Marshal(task)
+	assert.NoError(t, err)
+	t.Log(string(taskJson))
+	t.Log(len(taskJson))
 }
 
 func TestTask_Apply_kubectl(t *testing.T) {
@@ -157,7 +181,7 @@ kubectl get pod -A
 	assert.NoError(t, err)
 	assert.NotNil(t, cm)
 
-	job, err := task.GenerateJob(script)
+	job, err := task.GenerateJob()
 	assert.NoError(t, err)
 	assert.NotNil(t, job)
 
@@ -171,5 +195,31 @@ kubectl get pod -A
 	time.Sleep(time.Second * 20)
 	_ = cli.DeleteJob(ctx, ns, job.GetName())
 	_ = cli.DeleteConfigMap(ctx, ns, cm.GetName())
+
+}
+
+func TestParseTaskFromJob(t *testing.T) {
+	task := v2.NewTask(
+		"test-pytask",
+		"default",
+		"nyurik/alpine-python3-requests",
+		`
+import requests
+req = requests.get("http://www.baidu.com")
+print(req.text)
+`,
+		v2.ScriptExecutorPython)
+
+	script, err := task.GenerateScript()
+	assert.NoError(t, err)
+	assert.NotNil(t, script)
+
+	job, err := task.GenerateJob()
+	assert.NoError(t, err)
+	assert.NotNil(t, job)
+
+	task2, err := v2.ParseTaskFromJob(job)
+	assert.NoError(t, err)
+	assert.NotNil(t, task2)
 
 }

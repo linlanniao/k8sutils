@@ -2,9 +2,11 @@ package v2
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	"github.com/linlanniao/k8sutils"
+	"github.com/linlanniao/k8sutils/controller"
 	"github.com/linlanniao/k8sutils/validate"
 	batchv1 "k8s.io/api/batch/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -13,10 +15,16 @@ import (
 )
 
 type manager struct {
-	clientset   *k8sutils.Clientset
-	taskTracker *sync.Map
-	jobTracker  *sync.Map
-	podTracker  *sync.Map
+	clientset      *k8sutils.Clientset
+	mainController *controller.MasterController
+	taskTracker    *sync.Map
+	jobTracker     *sync.Map
+	podTracker     *sync.Map
+
+	iTaskCRUD        ITaskCRUD
+	iTaskCallback    ITaskCallback
+	iTaskRunCRUD     ITaskRunCRUD
+	iTaskRunCallback ITaskRunCallback
 }
 
 var (
@@ -36,6 +44,80 @@ func Manager() *manager {
 	})
 
 	return singleMgr
+}
+
+// SetITaskCRUD sets the ITaskCRUD interface for the manager.
+func (m *manager) SetITaskCRUD(crud ITaskCRUD) *manager {
+	m.iTaskCRUD = crud
+	return m
+}
+
+// SetITaskCallback sets the ITaskCallback interface for the manager.
+func (m *manager) SetITaskCallback(callback ITaskCallback) *manager {
+	m.iTaskCallback = callback
+	return m
+}
+
+// SetITaskRunCRUD sets the ITaskRunCRUD interface for the manager.
+func (m *manager) SetITaskRunCRUD(crud ITaskRunCRUD) *manager {
+	m.iTaskRunCRUD = crud
+	return m
+}
+
+// SetITaskRunCallback sets the ITaskRunCallback interface for the manager.
+func (m *manager) SetITaskRunCallback(callback ITaskRunCallback) *manager {
+	m.iTaskRunCallback = callback
+	return m
+}
+
+// InitController initializes the controller
+func (m *manager) InitController() error {
+	// skip init if already inited
+	if m.mainController != nil {
+		return errors.New("already inited")
+	}
+
+	if m.iTaskCRUD == nil {
+		return errors.New("ITaskCRUD not set")
+	}
+	if m.iTaskCallback == nil {
+		return errors.New("ITaskCallback not set")
+	}
+	if m.iTaskRunCRUD == nil {
+		return errors.New("ITaskRunCRUD not set")
+	}
+	if m.iTaskRunCallback == nil {
+		return errors.New("ITaskRunCallback not set")
+	}
+
+	// init pod handler
+	podHandler := controller.NewPodHandler(
+		m.iTaskRunCallback.Name(),
+		m.iTaskRunCallback.Namespace(),
+		m.iTaskRunCallback.Workers(),
+		nil,
+		nil,
+		//iTaskSvc.OnAddedUpdatedFunc(),
+		//iTaskSvc.OnDeletedFunc(),
+		m.clientset,
+	)
+
+	// init job handler
+	jobHandler := controller.NewJobHandler(
+		m.iTaskCallback.Name(),
+		m.iTaskCallback.Namespace(),
+		m.iTaskCallback.Workers(),
+		nil,
+		nil,
+		//iTaskSvc.OnAddedUpdatedFunc(),
+		//iTaskSvc.OnDeletedFunc(),
+		m.clientset,
+	)
+
+	// init mainController
+	m.mainController = controller.NewMasterController(controller.WithHandlers(podHandler, jobHandler))
+
+	return nil
 }
 
 const (
@@ -188,7 +270,7 @@ func (m *manager) RunTask(ctx context.Context, task *Task) (err error) {
 	script.Status.Configmap = configMap
 
 	// generate job
-	job, err := task.GenerateJob(script)
+	job, err := task.GenerateJob()
 	if err != nil {
 		return err
 	}
@@ -251,4 +333,18 @@ func (m *manager) CleanupTask(ctx context.Context, task *Task) (err error) {
 	}
 
 	return nil
+}
+
+func (m *manager) onJobCreated(job batchv1.Job) {
+	key, err := cache.MetaNamespaceKeyFunc(&job)
+	if err != nil {
+		return
+	}
+
+	m.jobTracker.Store(key, &job)
+
+	// job to task
+
+	// task callback
+
 }

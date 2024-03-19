@@ -21,6 +21,29 @@ type JobHandler struct {
 	clientset          *k8sutils.Clientset
 }
 
+func NewJobHandler(
+	name string,
+	namespace string,
+	workers int,
+	onAddedUpdatedFunc JobOnAddedUpdatedFunc,
+	onDeletedFunc JobOnDeletedFunc,
+	clientset *k8sutils.Clientset,
+) Controller {
+	ph := &JobHandler{
+		name:               name,
+		clientset:          clientset,
+		namespace:          namespace,
+		workers:            workers,
+		onAddedUpdatedFunc: onAddedUpdatedFunc,
+		onDeletedFunc:      onDeletedFunc,
+	}
+
+	h := newController(ph)
+	return h
+}
+
+var _ handler = (*JobHandler)(nil) // check if JobHandler implements the handler interface
+
 func (j JobHandler) Name() string {
 	return j.name
 }
