@@ -10,14 +10,13 @@ import (
 	"k8s.io/apimachinery/pkg/selection"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 )
 
 const (
-	controllerKey      = "controller.k8sutils.ppops.cn"
 	reSyncPeriod       = 5 * time.Minute
 	defaultWorkers int = 3
 )
@@ -33,11 +32,9 @@ type controller struct {
 	indexer            cache.Indexer
 	queue              workqueue.RateLimitingInterface
 	informer           cache.Controller
-	clientset          *kubernetes.Clientset
 	workers            int
 	onAddedUpdatedFunc onAddedUpdatedFunc
 	onDeletedFunc      onDeletedFunc
-	selector           labels.Selector
 }
 
 type handler interface {
@@ -48,44 +45,42 @@ type handler interface {
 	GetWorkers() int
 	Kind() runtime.Object
 	Resource() string
-	ClientSet() *kubernetes.Clientset
+	RESTClient() rest.Interface
+	WatchKeyValue() (key, value string)
 }
 
 // newController creates a new controller.
-func newController(hi handler) *controller {
+func newController(h handler) *controller {
 
-	h := &controller{
-		name:               hi.Name(),
-		resource:           hi.Resource(),
-		kind:               hi.Kind(),
+	c := &controller{
+		name:               h.Name(),
+		resource:           h.Resource(),
+		kind:               h.Kind(),
 		indexer:            nil,
 		queue:              nil,
 		informer:           nil,
-		clientset:          hi.ClientSet(),
-		workers:            hi.GetWorkers(),
-		onAddedUpdatedFunc: hi.OnAddedUpdated,
-		onDeletedFunc:      hi.OnDeleted,
-		selector:           nil,
+		workers:            h.GetWorkers(),
+		onAddedUpdatedFunc: h.OnAddedUpdated,
+		onDeletedFunc:      h.OnDeleted,
 	}
-	lbl := h.Selector().String()
 
 	optionsModifier := func(options *metav1.ListOptions) {
-		options.LabelSelector = lbl
+		options.LabelSelector = newSelector(h.WatchKeyValue()).String()
 	}
 
 	listWatcher := cache.NewFilteredListWatchFromClient(
-		hi.ClientSet().CoreV1().RESTClient(),
-		hi.Resource(),
-		hi.Namespace(),
+		h.RESTClient(),
+		h.Resource(),
+		h.Namespace(),
 		optionsModifier,
 	)
 
 	// setup queue
 	queue := workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
-	h.queue = queue
+	c.queue = queue
 
 	// setup informer and indexer
-	indexer, informer := cache.NewIndexerInformer(listWatcher, hi.Kind(), reSyncPeriod, cache.ResourceEventHandlerFuncs{
+	indexer, informer := cache.NewIndexerInformer(listWatcher, h.Kind(), reSyncPeriod, cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj any) {
 			key, err := cache.MetaNamespaceKeyFunc(obj)
 			if err == nil {
@@ -107,15 +102,15 @@ func newController(hi handler) *controller {
 			}
 		},
 	}, cache.Indexers{})
-	h.informer = informer
-	h.indexer = indexer
+	c.informer = informer
+	c.indexer = indexer
 
 	// setup workers
-	if h.workers <= 0 {
-		h.workers = defaultWorkers
+	if c.workers <= 0 {
+		c.workers = defaultWorkers
 	}
 
-	return h
+	return c
 }
 
 func (c *controller) processNextItem() bool {
@@ -213,22 +208,14 @@ func (c *controller) Run(stopCh chan struct{}) {
 	klog.Infof("stopping %s controller", c.name)
 }
 
-func (c *controller) Selector() labels.Selector {
-	if c.selector != nil {
-		return c.selector
-	}
+func newSelector(key, value string) labels.Selector {
 	selector := labels.NewSelector()
-
-	key := controllerKey + "/" + c.resource
-	value := c.name
 
 	req, _ := labels.NewRequirement(key, selection.Equals, []string{value})
 
 	selector = selector.Add(*req)
 
-	c.selector = selector
-
-	return c.selector
+	return selector
 }
 
 func (c *controller) Namespace() string {

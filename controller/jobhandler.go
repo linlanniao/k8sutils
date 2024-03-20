@@ -7,6 +7,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
 type JobOnAddedUpdatedFunc func(key string, job *batchv1.Job) error
@@ -19,6 +20,16 @@ type JobHandler struct {
 	onAddedUpdatedFunc JobOnAddedUpdatedFunc
 	onDeletedFunc      JobOnDeletedFunc
 	clientset          *k8sutils.Clientset
+	watchKey           string
+	watchValue         string
+}
+
+func (j JobHandler) RESTClient() rest.Interface {
+	return j.clientset.GetClientSet().BatchV1().RESTClient()
+}
+
+func (j JobHandler) WatchKeyValue() (key, value string) {
+	return j.watchKey, j.watchValue
 }
 
 func NewJobHandler(
@@ -28,6 +39,8 @@ func NewJobHandler(
 	onAddedUpdatedFunc JobOnAddedUpdatedFunc,
 	onDeletedFunc JobOnDeletedFunc,
 	clientset *k8sutils.Clientset,
+	watchKey string,
+	watchValue string,
 ) Controller {
 	ph := &JobHandler{
 		name:               name,
@@ -36,6 +49,8 @@ func NewJobHandler(
 		workers:            workers,
 		onAddedUpdatedFunc: onAddedUpdatedFunc,
 		onDeletedFunc:      onDeletedFunc,
+		watchKey:           watchKey,
+		watchValue:         watchValue,
 	}
 
 	h := newController(ph)

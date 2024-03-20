@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/linlanniao/k8sutils"
 	"github.com/linlanniao/k8sutils/controller"
@@ -21,10 +22,8 @@ type manager struct {
 	jobTracker     *sync.Map
 	podTracker     *sync.Map
 
-	iTaskCRUD        ITaskCRUD
-	iTaskCallback    ITaskCallback
-	iTaskRunCRUD     ITaskRunCRUD
-	iTaskRunCallback ITaskRunCallback
+	iTaskService    ITaskService
+	iTaskRunService ITaskRunService
 }
 
 var (
@@ -46,82 +45,55 @@ func Manager() *manager {
 	return singleMgr
 }
 
-// SetITaskCRUD sets the ITaskCRUD interface for the manager.
-func (m *manager) SetITaskCRUD(crud ITaskCRUD) *manager {
-	m.iTaskCRUD = crud
-	return m
-}
-
-// SetITaskCallback sets the ITaskCallback interface for the manager.
-func (m *manager) SetITaskCallback(callback ITaskCallback) *manager {
-	m.iTaskCallback = callback
-	return m
-}
-
-// SetITaskRunCRUD sets the ITaskRunCRUD interface for the manager.
-func (m *manager) SetITaskRunCRUD(crud ITaskRunCRUD) *manager {
-	m.iTaskRunCRUD = crud
-	return m
-}
-
-// SetITaskRunCallback sets the ITaskRunCallback interface for the manager.
-func (m *manager) SetITaskRunCallback(callback ITaskRunCallback) *manager {
-	m.iTaskRunCallback = callback
-	return m
-}
-
 // InitController initializes the controller
-func (m *manager) InitController() error {
+func (m *manager) InitController(taskSvc ITaskService, taskRunSvc ITaskRunService) error {
 	// skip init if already inited
 	if m.mainController != nil {
 		return errors.New("already inited")
 	}
 
-	if m.iTaskCRUD == nil {
-		return errors.New("ITaskCRUD not set")
-	}
-	if m.iTaskCallback == nil {
-		return errors.New("ITaskCallback not set")
-	}
-	if m.iTaskRunCRUD == nil {
-		return errors.New("ITaskRunCRUD not set")
-	}
-	if m.iTaskRunCallback == nil {
-		return errors.New("ITaskRunCallback not set")
-	}
-
-	// init pod handler
-	podHandler := controller.NewPodHandler(
-		m.iTaskRunCallback.Name(),
-		m.iTaskRunCallback.Namespace(),
-		m.iTaskRunCallback.Workers(),
-		nil,
-		nil,
-		//iTaskSvc.OnAddedUpdatedFunc(),
-		//iTaskSvc.OnDeletedFunc(),
-		m.clientset,
-	)
+	m.iTaskService = taskSvc
+	m.iTaskRunService = taskRunSvc
 
 	// init job handler
 	jobHandler := controller.NewJobHandler(
-		m.iTaskCallback.Name(),
-		m.iTaskCallback.Namespace(),
-		m.iTaskCallback.Workers(),
+		m.iTaskService.Name(),
+		m.iTaskService.Namespace(),
+		m.iTaskService.Workers(),
+		m.onJobAddedUpdated,
+		m.onJobDeleted,
+		m.clientset,
+		managerAddLabelKey,
+		managerAddLabelVal,
+	)
+
+	// init pod handler
+	podHandler := controller.NewPodHandler(
+		m.iTaskRunService.Name(),
+		m.iTaskRunService.Namespace(),
+		m.iTaskRunService.Workers(),
 		nil,
 		nil,
 		//iTaskSvc.OnAddedUpdatedFunc(),
 		//iTaskSvc.OnDeletedFunc(),
 		m.clientset,
+		managerAddLabelKey,
+		managerAddLabelVal,
 	)
 
+	_ = podHandler // TODO finish this handler
+
 	// init mainController
-	m.mainController = controller.NewMasterController(controller.WithHandlers(podHandler, jobHandler))
+	m.mainController = controller.NewMasterController(controller.WithHandlers(
+		jobHandler,
+		//podHandler,
+	))
 
 	return nil
 }
 
 const (
-	managerAddLabelKey = "kbatch.k8sutils.ppops.cn/manager-version"
+	managerAddLabelKey = "kbatch.k8sutils.ppops.cn/manager"
 	managerAddLabelVal = "alpha-v2"
 
 	clusterRootLabelKey = "kbatch.k8sutils.ppops.cn/privilege"
@@ -185,8 +157,8 @@ func (m *manager) ApplyK8sManagerClusterRBAC(ctx context.Context) error {
 	return nil
 }
 
-// startTrackingTask stores the task in the tracking map.
-func (m *manager) startTrackingTask(task *Task) error {
+// storeTrackingTask stores the task in the tracking map.
+func (m *manager) storeTrackingTask(task *Task) error {
 	key, err := cache.MetaNamespaceKeyFunc(task)
 	if err != nil {
 		return err
@@ -196,8 +168,8 @@ func (m *manager) startTrackingTask(task *Task) error {
 	return nil
 }
 
-// stopTrackingTask deletes the task from the tracking map.
-func (m *manager) stopTrackingTask(task *Task) error {
+// deleteTrackingTask deletes the task from the tracking map.
+func (m *manager) deleteTrackingTask(task *Task) error {
 	key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(task)
 	if err != nil {
 		return err
@@ -207,7 +179,7 @@ func (m *manager) stopTrackingTask(task *Task) error {
 	return nil
 }
 
-func (m *manager) startTrackingJob(job *batchv1.Job) error {
+func (m *manager) storeTrackingJob(job *batchv1.Job) error {
 	key, err := cache.MetaNamespaceKeyFunc(job)
 	if err != nil {
 		return err
@@ -217,7 +189,16 @@ func (m *manager) startTrackingJob(job *batchv1.Job) error {
 	return nil
 }
 
-func (m *manager) stopTrackingJob(job *batchv1.Job) error {
+func (m *manager) loadTrackingJob(key string) (job *batchv1.Job, ok bool) {
+	if obj, ok := m.jobTracker.Load(key); ok {
+		if job, ok := obj.(*batchv1.Job); ok {
+			return job, ok
+		}
+	}
+	return nil, false
+}
+
+func (m *manager) deleteTrackingJob(job *batchv1.Job) error {
 	key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(job)
 	if err != nil {
 		return err
@@ -237,7 +218,7 @@ func (m *manager) RunTask(ctx context.Context, task *Task) (err error) {
 	task.SetLabels(ManagerLabelsDefault())
 
 	// Add the task to the tracking map.
-	err = m.startTrackingTask(task)
+	err = m.storeTrackingTask(task)
 	if err != nil {
 		return err
 	}
@@ -245,7 +226,7 @@ func (m *manager) RunTask(ctx context.Context, task *Task) (err error) {
 	// Defer a function that removes the task from the tracking map if the creation of the resources fails.
 	defer func() {
 		if err != nil {
-			_ = m.stopTrackingTask(task)
+			_ = m.deleteTrackingTask(task)
 		}
 	}()
 
@@ -286,7 +267,7 @@ func (m *manager) RunTask(ctx context.Context, task *Task) (err error) {
 	task.Status.Job = job
 
 	// tracking job
-	err = m.startTrackingJob(job)
+	err = m.storeTrackingJob(job)
 	if err != nil {
 		return err
 	}
@@ -294,7 +275,7 @@ func (m *manager) RunTask(ctx context.Context, task *Task) (err error) {
 	// Defer a function that removes the job from the tracking map if the creation of the resources fails.
 	defer func() {
 		if err != nil {
-			_ = m.stopTrackingJob(job)
+			_ = m.deleteTrackingJob(job)
 		}
 	}()
 
@@ -335,16 +316,113 @@ func (m *manager) CleanupTask(ctx context.Context, task *Task) (err error) {
 	return nil
 }
 
-func (m *manager) onJobCreated(job batchv1.Job) {
-	key, err := cache.MetaNamespaceKeyFunc(&job)
-	if err != nil {
-		return
+func (m *manager) Start(ctx context.Context) error {
+	if m.mainController == nil {
+		return errors.New("mainController not inited")
 	}
 
-	m.jobTracker.Store(key, &job)
+	// apply rbac configuration
+	if err := m.ApplyK8sManagerClusterRBAC(ctx); err != nil {
+		return err
+	}
 
-	// job to task
+	// query tasks, filter tasks is Running.
 
-	// task callback
+	// add task to taskTacker
 
+	// for loop forever, refactor with function?
+	//   1. get task from taskTacker, filter tasks that are not active
+	//   2. run task(create pod / create configmap)
+	//   3. sleep 5s
+
+	// run controller.
+	return m.mainController.Run(ctx)
+}
+
+const (
+	callBackMaxRuntime = time.Second * 300
+)
+
+func (m *manager) onJobAddedUpdated(key string, job *batchv1.Job) error {
+	//klog.Infof("onJobAddedUpdated, key=%s", key)
+
+	if oldJob, ok := m.loadTrackingJob(key); ok {
+		older := oldJob.Status
+		newer := job.Status
+
+		if older.Active == newer.Active &&
+			older.Succeeded == newer.Succeeded &&
+			older.Failed == newer.Succeeded &&
+			len(older.Conditions) == len(newer.Conditions) {
+			// The status of the new and old jobs is consistent, skip the follow-up processing.
+			return nil
+		}
+	}
+
+	do := func(job *batchv1.Job) error {
+		// context
+		ctx, cancel := context.WithTimeout(context.Background(), callBackMaxRuntime)
+		defer cancel()
+
+		// update tracking job
+		err := m.storeTrackingJob(job)
+		if err != nil {
+			return err
+		}
+
+		task, err := ParseTaskFromJob(job)
+		if err != nil {
+			return err
+		}
+		status := job.Status
+
+		task.Status.Job = job
+		task.Status.IsJobApplied = true
+		task.Status.Active = status.Active
+		task.Status.Succeeded = status.Succeeded
+		task.Status.Failed = status.Failed
+
+		if len(status.Conditions) == 0 {
+			// conditions is empty means the job is not done
+			task.Status.Condition = nil
+			m.iTaskService.OnTaskStatusUpdateFunc(ctx, task)
+
+			return nil
+
+		} else {
+			// job is already done, update status and run callback function
+			c0 := status.Conditions[0]
+			task.Status.Condition = &TaskCondition{
+				Type:               TaskConditionType(c0.Type),
+				Status:             ConditionStatus(c0.Status),
+				LastProbeTime:      c0.LastProbeTime,
+				LastTransitionTime: c0.LastTransitionTime,
+				Reason:             c0.Reason,
+				Message:            c0.Message,
+			}
+
+			// callback
+			m.iTaskService.OnTaskStatusUpdateFunc(ctx, task)
+			m.iTaskService.OnTaskDoneFunc(ctx, task)
+
+			// delete tracking job
+			return m.deleteTrackingJob(job)
+		}
+	}
+
+	err := do(job)
+	if err != nil {
+		klog.Errorf("onJobAddedUpdated, key=%s, err=%v", key, err)
+		return err
+	}
+	klog.Infof("onJobAddedUpdated, key=%s", key)
+	return nil
+
+}
+
+func (m *manager) onJobDeleted(key string) error {
+	// Delete the value of jobTracker to avoid memory leakage
+	m.jobTracker.Delete(key)
+	klog.Infof("onJobDeleted, key=%s", key)
+	return nil
 }

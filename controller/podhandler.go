@@ -7,6 +7,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
 type PodOnAddedUpdatedFunc func(key string, pod *corev1.Pod) error
@@ -19,6 +20,16 @@ type PodHandler struct {
 	onAddedUpdatedFunc PodOnAddedUpdatedFunc
 	onDeletedFunc      PodOnDeletedFunc
 	clientset          *k8sutils.Clientset
+	watchKey           string
+	watchValue         string
+}
+
+func (p PodHandler) RESTClient() rest.Interface {
+	return p.clientset.GetClientSet().CoreV1().RESTClient()
+}
+
+func (p PodHandler) WatchKeyValue() (key, value string) {
+	return p.watchKey, p.watchValue
 }
 
 func NewPodHandler(
@@ -28,6 +39,8 @@ func NewPodHandler(
 	onAddedUpdatedFunc PodOnAddedUpdatedFunc,
 	onDeletedFunc PodOnDeletedFunc,
 	clientset *k8sutils.Clientset,
+	watchKey string,
+	watchValue string,
 ) Controller {
 	ph := &PodHandler{
 		name:               name,
@@ -36,6 +49,8 @@ func NewPodHandler(
 		workers:            workers,
 		onAddedUpdatedFunc: onAddedUpdatedFunc,
 		onDeletedFunc:      onDeletedFunc,
+		watchKey:           watchKey,
+		watchValue:         watchValue,
 	}
 
 	h := newController(ph)

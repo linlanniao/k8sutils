@@ -26,7 +26,7 @@ func createPod() (string, error) {
 			Name:      name,
 			Namespace: ns,
 			Labels: map[string]string{
-				"controller.k8sutils.ppops.cn/pods": "banana",
+				"testaaa": "testbbb",
 			},
 		},
 		Spec: corev1.PodSpec{
@@ -74,6 +74,8 @@ func TestNewPodHandler(t *testing.T) {
 		addedUpdateFunc,
 		deletedFunc,
 		k8sutils.GetClientset(),
+		"testaaa",
+		"testbbb",
 	)
 
 	c := controller.NewMasterController()

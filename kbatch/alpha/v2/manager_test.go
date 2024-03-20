@@ -46,3 +46,44 @@ print(req.text)
 	assert.NoError(t, err)
 
 }
+
+func TestManager_Start(t *testing.T) {
+	mgr := v2.Manager()
+	assert.NotNil(t, mgr)
+
+	err := mgr.InitController(v2.FakeTaskService{}, v2.FakeTaskRunService{})
+	assert.NoError(t, err)
+
+	go func() {
+		err := mgr.Start(context.Background())
+		assert.NoError(t, err)
+	}()
+
+	time.Sleep(time.Second * 5)
+
+	ctx := context.Background()
+	ns := "default"
+	task := v2.NewTask(
+		"test-pytask",
+		ns,
+		"nyurik/alpine-python3-requests",
+		`
+import requests
+req = requests.get("http://www.baidu.com")
+print(req.text)
+`,
+		v2.ScriptExecutorPython)
+
+	// create task
+	err = mgr.RunTask(ctx, task)
+	assert.NoError(t, err)
+
+	time.Sleep(time.Second * 10)
+
+	// cleanup task
+	//err = mgr.CleanupTask(ctx, task)
+	//assert.NoError(t, err)
+
+	time.Sleep(time.Second * 10)
+
+}

@@ -2,8 +2,6 @@ package v2
 
 import (
 	"context"
-
-	corev1 "k8s.io/api/core/v1"
 )
 
 type ITaskListParams struct {
@@ -25,7 +23,9 @@ type ITaskCallback interface {
 	Name() string
 	Namespace() string
 	Workers() int
-	OnTaskRanFunc(ctx context.Context, task *Task)
+
+	//OnTaskRanFunc(ctx context.Context, task *Task)
+
 	OnTaskStatusUpdateFunc(ctx context.Context, task *Task)
 	OnTaskDoneFunc(ctx context.Context, task *Task)
 }
@@ -43,18 +43,18 @@ type ITaskRunListParams struct {
 }
 
 type ITaskRunCRUD interface {
-	Get(ctx context.Context, name string) (*Task, error)
-	Create(ctx context.Context, task *Task) (*Task, error)
-	Update(ctx context.Context, task *Task) (*Task, error)
+	Get(ctx context.Context, name string) (*TaskRun, error)
+	Create(ctx context.Context, taskRun *TaskRun) (*TaskRun, error)
+	Update(ctx context.Context, taskRun *TaskRun) (*TaskRun, error)
 	Delete(ctx context.Context, name string) error
-	List(ctx context.Context, param ITaskListParams) ([]*Task, error)
+	List(ctx context.Context, param ITaskRunListParams) ([]*TaskRun, error)
 }
 
 type ITaskRunCallback interface {
 	Name() string
 	Namespace() string
 	Workers() int
-	OnPodCreatedFunc() (ctx context.Context, pod *corev1.Pod)
+	OnPodCreatedFunc() (ctx context.Context, taskRun *TaskRun)
 	//OnAddedUpdatedFunc() mainController.PodOnAddedUpdatedFunc
 	//OnDeletedFunc() mainController.PodOnDeletedFunc
 	//TODO OnPodAdd

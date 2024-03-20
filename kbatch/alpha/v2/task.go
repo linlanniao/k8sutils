@@ -139,7 +139,67 @@ type TaskStatus struct {
 	IsJobApplied    bool         `json:"isJobApplied,omitempty"`
 	Script          *Script      `json:"script,omitempty"`
 	IsScriptApplied bool         `json:"isScriptApplied,omitempty"`
+
+	// The number of pending and running pods.
+	// +optional
+	Active int32 `json:"active,omitempty"`
+
+	// The number of pods which reached phase Succeeded.
+	// +optional
+	Succeeded int32 `json:"succeeded,omitempty"`
+
+	// The number of pods which reached phase Failed.
+	// +optional
+	Failed int32 `json:"failed,omitempty"`
+
+	// The latest available observations of an object's current state. when Condition is not nil, then the Task is done
+	// +optional
+	Condition *TaskCondition `json:"condition,omitempty"`
 }
+
+type TaskCondition struct {
+	// Type of task condition, Complete or Failed.
+	Type TaskConditionType `json:"type"`
+	// Status of the condition, one of True, False, Unknown.
+	Status ConditionStatus `json:"status"`
+	// Last time the condition was checked.
+	// +optional
+	LastProbeTime metav1.Time `json:"lastProbeTime,omitempty"`
+	// Last time the condition transit from one status to another.
+	// +optional
+	LastTransitionTime metav1.Time `json:"lastTransitionTime,omitempty"`
+	// (brief) reason for the condition's last transition.
+	// +optional
+	Reason string `json:"reason,omitempty"`
+	// Human readable message indicating details about last transition.
+	// +optional
+	Message string `json:"message,omitempty"`
+}
+
+type TaskConditionType string
+
+const (
+	// TaskSuspended means the task has been suspended.
+	TaskSuspended TaskConditionType = "Suspended"
+	// TaskComplete means the task has completed its execution.
+	TaskComplete TaskConditionType = "Complete"
+	// TaskFailed means the task has failed its execution.
+	TaskFailed TaskConditionType = "Failed"
+	// TaskFailureTarget means the task is about to fail its execution.
+	TaskFailureTarget TaskConditionType = "FailureTarget"
+)
+
+type ConditionStatus string
+
+// These are valid condition statuses. "ConditionTrue" means a resource is in the condition.
+// "ConditionFalse" means a resource is not in the condition. "ConditionUnknown" means kubernetes
+// can't decide if a resource is in the condition or not. In the future, we could add other
+// intermediate conditions, e.g. ConditionDegraded.
+const (
+	ConditionTrue    ConditionStatus = "True"
+	ConditionFalse   ConditionStatus = "False"
+	ConditionUnknown ConditionStatus = "Unknown"
+)
 
 func NewTask(
 	generateName, namespace, image, scriptContent string,
@@ -391,9 +451,9 @@ func ParseTaskFromJob(job *batchv1.Job) (*Task, error) {
 	if job.ObjectMeta.Annotations[TaskContentAnnotation] == "" {
 		return nil, errors.New("task content is empty")
 	}
-	var task Task
+	var task *Task
 	if err := json.Unmarshal([]byte(job.ObjectMeta.Annotations[TaskContentAnnotation]), &task); err != nil {
 		return nil, err
 	}
-	return &task, nil
+	return task, nil
 }
