@@ -23,11 +23,9 @@ type ITaskCallback interface {
 	Name() string
 	Namespace() string
 	Workers() int
-
-	//OnTaskRanFunc(ctx context.Context, task *Task)
-
-	OnTaskStatusUpdateFunc(ctx context.Context, task *Task)
-	OnTaskDoneFunc(ctx context.Context, task *Task)
+	OnStatusUpdate(ctx context.Context, task *Task)
+	OnFailed(ctx context.Context, task *Task)
+	OnSucceed(ctx context.Context, task *Task)
 }
 
 type ITaskService interface {
@@ -54,14 +52,11 @@ type ITaskRunCallback interface {
 	Name() string
 	Namespace() string
 	Workers() int
-	OnPodCreatedFunc() (ctx context.Context, taskRun *TaskRun)
-	//OnAddedUpdatedFunc() mainController.PodOnAddedUpdatedFunc
-	//OnDeletedFunc() mainController.PodOnDeletedFunc
-	//TODO OnPodAdd
-	//TODO OnPodUpdate
-	//TODO OnPodDelete
-	//Log ?
-	// status?
+	OnStatusUpdate(ctx context.Context, taskRun *TaskRun)
+	OnFailed(ctx context.Context, taskRun *TaskRun)
+	OnSucceed(ctx context.Context, taskRun *TaskRun)
+	OnLog(ctx context.Context, taskRun *TaskRun, logLine *LogLine)
+	Result(ctx context.Context, taskRun *TaskRun) (*TaskRunResult, error)
 }
 
 type ITaskRunService interface {

@@ -143,12 +143,12 @@ func (c *controller) processBusiness(key string) error {
 
 	if !exists {
 		// Below we will warm up our cache with a Obj, so that we will see a delete for one Obj
-		klog.Infof("deleting object: %s", key)
+		//klog.Infof("deleting object: %s", key)
 		return c.onDeletedFunc(key)
 	} else {
 		// Note that you also have to check the uid if you have a local controlled resource, which
 		// is dependent on the actual instance, to detect that a Pod was recreated with the same name
-		klog.Infof("sync/add/update for object: %s", key)
+		//klog.Infof("sync/add/update for object: %s", key)
 		return c.onAddedUpdatedFunc(key, obj)
 	}
 }

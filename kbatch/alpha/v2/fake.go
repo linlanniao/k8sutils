@@ -83,7 +83,7 @@ func (f FakeTaskService) Workers() int {
 	return 1
 }
 
-func (f FakeTaskService) OnTaskStatusUpdateFunc(ctx context.Context, task *Task) {
+func (f FakeTaskService) OnStatusUpdate(ctx context.Context, task *Task) {
 	klog.Infof(
 		"OnTaskAddedUpdateFunc, task.status.Active: %v, task.status.Successed: %v, task.status.Failed: %v",
 		task.Status.Active,
@@ -92,11 +92,43 @@ func (f FakeTaskService) OnTaskStatusUpdateFunc(ctx context.Context, task *Task)
 	)
 }
 
-func (f FakeTaskService) OnTaskDoneFunc(ctx context.Context, task *Task) {
-	klog.Infof("OnTaskDoneFunc, task.status.condition: %v", task.Status.Condition)
+func (f FakeTaskService) OnFailed(ctx context.Context, task *Task) {
+	klog.Infof("OnFailed, task.status.condition: %v", task.Status.Condition)
+
 }
 
+func (f FakeTaskService) OnSucceed(ctx context.Context, task *Task) {
+	klog.Infof("OnSucceed, task.status.condition: %v", task.Status.Condition)
+}
+
+var _ ITaskService = (*FakeTaskService)(nil)
+
 type FakeTaskRunService struct{}
+
+func (f FakeTaskRunService) OnSucceed(ctx context.Context, taskRun *TaskRun) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (f FakeTaskRunService) OnLog(ctx context.Context, taskRun *TaskRun, logLine *LogLine) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (f FakeTaskRunService) Result(ctx context.Context, taskRun *TaskRun) (*TaskRunResult, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (f FakeTaskRunService) OnStatusUpdate(ctx context.Context, taskRun *TaskRun) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (f FakeTaskRunService) OnFailed(ctx context.Context, taskRun *TaskRun) {
+	//TODO implement me
+	panic("implement me")
+}
 
 func (f FakeTaskRunService) Get(ctx context.Context, name string) (*TaskRun, error) {
 	//TODO implement me
@@ -139,3 +171,5 @@ func (f FakeTaskRunService) OnPodCreatedFunc() (ctx context.Context, taskRun *Ta
 	//TODO implement me
 	panic("implement me")
 }
+
+var _ ITaskRunService = (*FakeTaskRunService)(nil)

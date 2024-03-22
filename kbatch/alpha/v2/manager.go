@@ -3,6 +3,7 @@ package v2
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -10,17 +11,17 @@ import (
 	"github.com/linlanniao/k8sutils/controller"
 	"github.com/linlanniao/k8sutils/validate"
 	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
-	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 )
 
 type manager struct {
 	clientset      *k8sutils.Clientset
 	mainController *controller.MasterController
-	taskTracker    *sync.Map
-	jobTracker     *sync.Map
-	podTracker     *sync.Map
+	taskTracker    *taskTracker
+	jobTracker     *jobTracker
+	podTracker     *podTracker
 
 	iTaskService    ITaskService
 	iTaskRunService ITaskRunService
@@ -36,12 +37,11 @@ func Manager() *manager {
 	singleMgrOnce.Do(func() {
 		singleMgr = &manager{
 			clientset:   k8sutils.GetClientset(),
-			taskTracker: &sync.Map{},
-			jobTracker:  &sync.Map{},
-			podTracker:  &sync.Map{},
+			taskTracker: newTaskTracker(),
+			jobTracker:  newJobTracker(),
+			podTracker:  newPodTracker(),
 		}
 	})
-
 	return singleMgr
 }
 
@@ -157,56 +157,73 @@ func (m *manager) ApplyK8sManagerClusterRBAC(ctx context.Context) error {
 	return nil
 }
 
-// storeTrackingTask stores the task in the tracking map.
-func (m *manager) storeTrackingTask(task *Task) error {
-	key, err := cache.MetaNamespaceKeyFunc(task)
-	if err != nil {
-		return err
-	}
-
-	m.taskTracker.Store(key, task)
-	return nil
-}
-
-// deleteTrackingTask deletes the task from the tracking map.
-func (m *manager) deleteTrackingTask(task *Task) error {
-	key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(task)
-	if err != nil {
-		return err
-	}
-
-	m.taskTracker.Delete(key)
-	return nil
-}
-
-func (m *manager) storeTrackingJob(job *batchv1.Job) error {
-	key, err := cache.MetaNamespaceKeyFunc(job)
-	if err != nil {
-		return err
-	}
-
-	m.jobTracker.Store(key, job)
-	return nil
-}
-
-func (m *manager) loadTrackingJob(key string) (job *batchv1.Job, ok bool) {
-	if obj, ok := m.jobTracker.Load(key); ok {
-		if job, ok := obj.(*batchv1.Job); ok {
-			return job, ok
-		}
-	}
-	return nil, false
-}
-
-func (m *manager) deleteTrackingJob(job *batchv1.Job) error {
-	key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(job)
-	if err != nil {
-		return err
-	}
-
-	m.jobTracker.Delete(key)
-	return nil
-}
+//// storeTrackingTask stores the task in the tracking map.
+//func (m *manager) storeTrackingTask(task *Task) error {
+//	key, err := cache.MetaNamespaceKeyFunc(task)
+//	if err != nil {
+//		return err
+//	}
+//
+//	m.taskTracker.Store(key, task)
+//	return nil
+//}
+//
+//// deleteTrackingTask deletes the task from the tracking map.
+//func (m *manager) deleteTrackingTask(task *Task) error {
+//	key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(task)
+//	if err != nil {
+//		return err
+//	}
+//
+//	m.taskTracker.Delete(key)
+//	return nil
+//}
+//
+//func (m *manager) storeTrackingJob(job *batchv1.Job) error {
+//	key, err := cache.MetaNamespaceKeyFunc(job)
+//	if err != nil {
+//		return err
+//	}
+//
+//	m.jobTracker.Store(key, job)
+//	return nil
+//}
+//
+//func (m *manager) loadTrackingJob(key string) (*batchv1.Job, error) {
+//	obj, ok := m.jobTracker.Load(key)
+//	if !ok {
+//		return nil, errors.New("not found")
+//	}
+//	job, ok := obj.(*batchv1.Job)
+//	if !ok {
+//		return nil, errors.New("object is not a job")
+//	}
+//
+//	return job, nil
+//}
+//
+//func (m *manager) deleteTrackingJob(job *batchv1.Job) error {
+//	key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(job)
+//	if err != nil {
+//		return err
+//	}
+//
+//	m.jobTracker.Delete(key)
+//	return nil
+//}
+//
+//func (m *manager) loadTrackingPod(key string) (*corev1.Pod, error) {
+//	obj, ok := m.podTracker.Load(key)
+//	if !ok {
+//		return nil, errors.New("not found")
+//	}
+//	pod, ok := obj.(*corev1.Pod)
+//	if !ok {
+//		return nil, errors.New("object is not a pod")
+//	}
+//
+//	return pod, nil
+//}
 
 func (m *manager) RunTask(ctx context.Context, task *Task) (err error) {
 	// Try to validate the task.
@@ -218,7 +235,7 @@ func (m *manager) RunTask(ctx context.Context, task *Task) (err error) {
 	task.SetLabels(ManagerLabelsDefault())
 
 	// Add the task to the tracking map.
-	err = m.storeTrackingTask(task)
+	err = m.taskTracker.store(task)
 	if err != nil {
 		return err
 	}
@@ -226,7 +243,7 @@ func (m *manager) RunTask(ctx context.Context, task *Task) (err error) {
 	// Defer a function that removes the task from the tracking map if the creation of the resources fails.
 	defer func() {
 		if err != nil {
-			_ = m.deleteTrackingTask(task)
+			_ = m.taskTracker.delete(task)
 		}
 	}()
 
@@ -267,7 +284,7 @@ func (m *manager) RunTask(ctx context.Context, task *Task) (err error) {
 	task.Status.Job = job
 
 	// tracking job
-	err = m.storeTrackingJob(job)
+	err = m.jobTracker.store(job)
 	if err != nil {
 		return err
 	}
@@ -275,7 +292,7 @@ func (m *manager) RunTask(ctx context.Context, task *Task) (err error) {
 	// Defer a function that removes the job from the tracking map if the creation of the resources fails.
 	defer func() {
 		if err != nil {
-			_ = m.deleteTrackingJob(job)
+			_ = m.jobTracker.delete(job)
 		}
 	}()
 
@@ -344,9 +361,9 @@ const (
 )
 
 func (m *manager) onJobAddedUpdated(key string, job *batchv1.Job) error {
-	//klog.Infof("onJobAddedUpdated, key=%s", key)
-
-	if oldJob, ok := m.loadTrackingJob(key); ok {
+	// Try to get oldJob from JobTracker, compare the status of oldJob and newJob.
+	// If the status is consistent, skip the subsequent operation.
+	if oldJob, err := m.jobTracker.load(key); oldJob != nil && err == nil {
 		older := oldJob.Status
 		newer := job.Status
 
@@ -354,7 +371,6 @@ func (m *manager) onJobAddedUpdated(key string, job *batchv1.Job) error {
 			older.Succeeded == newer.Succeeded &&
 			older.Failed == newer.Succeeded &&
 			len(older.Conditions) == len(newer.Conditions) {
-			// The status of the new and old jobs is consistent, skip the follow-up processing.
 			return nil
 		}
 	}
@@ -365,11 +381,12 @@ func (m *manager) onJobAddedUpdated(key string, job *batchv1.Job) error {
 		defer cancel()
 
 		// update tracking job
-		err := m.storeTrackingJob(job)
+		err := m.jobTracker.store(job)
 		if err != nil {
 			return err
 		}
 
+		// update task status with the new job
 		task, err := ParseTaskFromJob(job)
 		if err != nil {
 			return err
@@ -385,7 +402,7 @@ func (m *manager) onJobAddedUpdated(key string, job *batchv1.Job) error {
 		if len(status.Conditions) == 0 {
 			// conditions is empty means the job is not done
 			task.Status.Condition = nil
-			m.iTaskService.OnTaskStatusUpdateFunc(ctx, task)
+			m.iTaskService.OnStatusUpdate(ctx, task)
 
 			return nil
 
@@ -402,11 +419,17 @@ func (m *manager) onJobAddedUpdated(key string, job *batchv1.Job) error {
 			}
 
 			// callback
-			m.iTaskService.OnTaskStatusUpdateFunc(ctx, task)
-			m.iTaskService.OnTaskDoneFunc(ctx, task)
+			m.iTaskService.OnStatusUpdate(ctx, task)
+
+			switch task.Status.Condition.Type {
+			case TaskComplete:
+				m.iTaskService.OnSucceed(ctx, task)
+			default:
+				m.iTaskService.OnFailed(ctx, task)
+			}
 
 			// delete tracking job
-			return m.deleteTrackingJob(job)
+			return m.jobTracker.delete(job)
 		}
 	}
 
@@ -422,7 +445,52 @@ func (m *manager) onJobAddedUpdated(key string, job *batchv1.Job) error {
 
 func (m *manager) onJobDeleted(key string) error {
 	// Delete the value of jobTracker to avoid memory leakage
-	m.jobTracker.Delete(key)
+
+	// delete tracking job
+	m.jobTracker.deleteByKey(key)
+
+	// delete tracking task
+	taskKey, err := RemoveSuffix(key, "-")
+	if err != nil {
+		return fmt.Errorf("onJobDeleted, failed to get taskKey, key=%s, err=%w", key, err)
+	}
+	m.taskTracker.deleteByKey(taskKey)
+
 	klog.Infof("onJobDeleted, key=%s", key)
+
+	return nil
+}
+
+func (m *manager) onPodAddedUpdated(key string, pod *corev1.Pod) error {
+	// Try to get oldPod from PodTracker, compare the status of oldPod and newPod.
+	// If the status is consistent, skip the subsequent operation.
+	if oldPod, err := m.podTracker.load(key); oldPod != nil && err == nil {
+		older := oldPod.Status
+		newer := pod.Status
+
+		if older.Phase == newer.Phase {
+			return nil
+		}
+	}
+
+	do := func(pod *corev1.Pod) {
+		// context
+
+		// update tracking pod
+
+		// parse taskRun from pod
+
+	}
+	_ = do // TODO
+	panic("notImplemented")
+}
+
+func (m *manager) onPodDeleted(key string) error {
+	// Delete the value of podTracker to avoid memory leakage
+
+	// delete tracking pod
+	m.podTracker.deleteByKey(key)
+
+	klog.Infof("onPodDeleted, key=%s", key)
 	return nil
 }

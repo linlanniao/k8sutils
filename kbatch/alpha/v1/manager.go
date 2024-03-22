@@ -73,6 +73,8 @@ func (m *manager) InitController(iTaskSvc ITaskService) error {
 		//iTaskSvc.OnAddedUpdatedFunc(),
 		//iTaskSvc.OnDeletedFunc(),
 		m.clientset,
+		managerLabelKeyDefault,
+		managerLabelValueDefault,
 	)
 
 	// init mainController

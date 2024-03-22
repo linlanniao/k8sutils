@@ -80,9 +80,9 @@ print(req.text)
 
 	time.Sleep(time.Second * 10)
 
-	// cleanup task
-	//err = mgr.CleanupTask(ctx, task)
-	//assert.NoError(t, err)
+	//cleanup task
+	err = mgr.CleanupTask(ctx, task)
+	assert.NoError(t, err)
 
 	time.Sleep(time.Second * 10)
 
