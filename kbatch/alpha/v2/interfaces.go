@@ -55,7 +55,8 @@ type ITaskRunCallback interface {
 	OnStatusUpdate(ctx context.Context, taskRun *TaskRun)
 	OnFailed(ctx context.Context, taskRun *TaskRun)
 	OnSucceed(ctx context.Context, taskRun *TaskRun)
-	OnLog(ctx context.Context, taskRun *TaskRun, logLine *LogLine)
+	OnLogs(ctx context.Context, taskRun *TaskRun, logLines LogLines)
+	CleanAllLogs(ctx context.Context, taskRun *TaskRun)
 	Result(ctx context.Context, taskRun *TaskRun) (*TaskRunResult, error)
 }
 

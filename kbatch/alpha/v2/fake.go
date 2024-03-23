@@ -105,12 +105,17 @@ var _ ITaskService = (*FakeTaskService)(nil)
 
 type FakeTaskRunService struct{}
 
-func (f FakeTaskRunService) OnSucceed(ctx context.Context, taskRun *TaskRun) {
+func (f FakeTaskRunService) CleanAllLogs(ctx context.Context, taskRun *TaskRun) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (f FakeTaskRunService) OnLog(ctx context.Context, taskRun *TaskRun, logLine *LogLine) {
+func (f FakeTaskRunService) OnLogs(ctx context.Context, taskRun *TaskRun, logLines LogLines) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (f FakeTaskRunService) OnSucceed(ctx context.Context, taskRun *TaskRun) {
 	//TODO implement me
 	panic("implement me")
 }

@@ -69,3 +69,39 @@ func (ps Parameters) Args() []string {
 	}
 	return args
 }
+
+// Args2Parameters converts a slice of arguments into a slice of Parameters.
+// The arguments are expected to be in pairs of key-value, where the key comes first and the value comes second.
+// the first argument will be dropped
+// For example:
+//
+//	Args2Parameters([]string{"/path/to/script.sh", "key1", "value1", "key2", "value2"})
+//
+// Returns:
+//
+//	Parameters{
+//	  &Parameter{Key: "key1", Value: "value1"},
+//	  &Parameter{Key: "key2", Value: "value2"},
+//	}
+//
+// If the number of arguments is odd or if the arguments are not in pairs, an error is returned.
+func Args2Parameters(args []string) (Parameters, error) {
+	if len(args) <= 1 {
+		return nil, errors.New("args cannot not less then 1")
+	}
+	args = args[1:]
+
+	parameters := make(Parameters, 0)
+
+	for i := 0; i < len(args)-1; i += 2 {
+		key := args[i]
+		value := args[i+1]
+		parameters = append(parameters, &Parameter{Key: key, Value: value})
+	}
+
+	if err := parameters.Validate(); err != nil {
+		return nil, err
+	}
+
+	return parameters, nil
+}

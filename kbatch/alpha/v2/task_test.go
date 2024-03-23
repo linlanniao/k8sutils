@@ -218,7 +218,7 @@ print(req.text)
 	assert.NoError(t, err)
 	assert.NotNil(t, job)
 
-	task2, err := v2.ParseTaskFromJob(job)
+	task2, err := v2.Job2Task(job)
 	assert.NoError(t, err)
 	assert.NotNil(t, task2)
 

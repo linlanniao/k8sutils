@@ -1,6 +1,10 @@
 package v2
 
 import (
+	"errors"
+	"fmt"
+
+	"github.com/linlanniao/k8sutils/validate"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -41,6 +45,82 @@ type TaskRunSpec struct {
 	// If specified, the pod's scheduling constraints'
 	// +optional
 	Affinity *corev1.Affinity `json:"affinity,omitempty"`
+}
+
+func Pod2TaskRun(pod *corev1.Pod) (*TaskRun, error) {
+	if pod == nil {
+		return nil, errors.New("pod is nil")
+	}
+
+	meta := pod.ObjectMeta.DeepCopy()
+	taskRun := &TaskRun{
+		ObjectMeta: *meta,
+		Spec:       TaskRunSpec{},
+		Status: TaskRunStatus{
+			Pod:       pod,
+			Phase:     TaskRunPhase(pod.Status.Phase),
+			Message:   pod.Status.Message,
+			Reason:    pod.Status.Reason,
+			HostIP:    pod.Status.HostIP,
+			PodIP:     pod.Status.PodIP,
+			StartTime: pod.Status.StartTime.DeepCopy(),
+		},
+	}
+
+	// spec.taskRef
+	if taskName, ok := pod.Labels[TaskNameLabelKey]; ok {
+		taskRun.Spec.TaskRef = &TaskRef{
+			Name:      taskName,
+			Namespace: pod.GetNamespace(),
+		}
+	}
+
+	podSpec := pod.Spec
+	if len(podSpec.Containers) == 0 {
+		return nil, errors.New("pod has no containers")
+	}
+	c0 := podSpec.Containers[0]
+
+	// spec.image
+	taskRun.Spec.Image = c0.Image
+
+	// spec.privilege
+	if podSpec.HostNetwork && podSpec.HostPID {
+		x := TaskPrivilegeHostRoot
+		taskRun.Spec.Privilege = &x
+	} else if podSpec.ServiceAccountName == K8sManagerSa {
+		x := TaskPrivilegeClusterRoot
+		taskRun.Spec.Privilege = &x
+	}
+
+	// spec.parameters
+	if ps, err := Args2Parameters(c0.Args); err == nil {
+		taskRun.Spec.Parameters = &ps
+	}
+
+	// spec.nodeName
+	if podSpec.NodeName != "" {
+		taskRun.Spec.NodeName = podSpec.NodeName
+	}
+
+	// spec.affinity
+	if podSpec.Affinity != nil {
+		taskRun.Spec.Affinity = podSpec.Affinity.DeepCopy()
+	}
+
+	// status
+	podStatus := pod.Status
+	taskRun.Status.Phase = TaskRunPhase(podStatus.Phase)
+	if err := validate.Validate(taskRun.Status.Phase); err != nil {
+		return nil, err
+	}
+	taskRun.Status.Message = podStatus.Message
+	taskRun.Status.Reason = podStatus.Reason
+	taskRun.Status.HostIP = podStatus.HostIP
+	taskRun.Status.PodIP = podStatus.PodIP
+	taskRun.Status.StartTime = podStatus.StartTime.DeepCopy()
+
+	return taskRun, nil
 }
 
 type TaskRunStatus struct {
@@ -87,7 +167,12 @@ type TaskRunStatus struct {
 	// +optional
 	PodIP string `json:"podIP,omitempty" protobuf:"bytes,6,opt,name=podIP"`
 
-	Result *TaskRunResult `json:"result,omitempty"`
+	// RFC 3339 date and time at which the object was acknowledged by the Kubelet.
+	// This is before the Kubelet pulled the container image(s) for the pod.
+	// +optional
+	StartTime *metav1.Time `json:"startTime,omitempty" protobuf:"bytes,7,opt,name=startTime"`
+
+	Result *TaskRunResult `json:"result,omitempty"` // TODO Need to design how to collect result data
 }
 
 // TaskRunPhase is a label for the condition of a pod at the current time.
@@ -114,6 +199,15 @@ const (
 	// Deprecated: It isn't being set since 2015 (74da3b14b0c0f658b3bb8d2def5094686d0e9095)
 	TaskRunUnknown TaskRunPhase = "Unknown"
 )
+
+func (p TaskRunPhase) Validate() error {
+	switch p {
+	case TaskRunPending, TaskRunRunning, TaskRunSucceeded, TaskRunFailed, TaskRunUnknown:
+		return nil
+	default:
+		return fmt.Errorf("%s is not a valid TaskRunPhase", p)
+	}
+}
 
 type TaskRunResult struct{}
 

@@ -441,7 +441,7 @@ func (t *Task) SetContentToAnnotation() *Task {
 	return t
 }
 
-func ParseTaskFromJob(job *batchv1.Job) (*Task, error) {
+func Job2Task(job *batchv1.Job) (*Task, error) {
 	if job == nil {
 		return nil, errors.New("job is nil")
 	}
@@ -452,8 +452,36 @@ func ParseTaskFromJob(job *batchv1.Job) (*Task, error) {
 		return nil, errors.New("task content is empty")
 	}
 	var task *Task
+
+	// fill metadata && spec
 	if err := json.Unmarshal([]byte(job.ObjectMeta.Annotations[TaskContentAnnotation]), &task); err != nil {
 		return nil, err
 	}
+
+	// fill status
+	status := job.Status
+
+	task.Status.Job = job
+	task.Status.IsJobApplied = true
+	task.Status.Active = status.Active
+	task.Status.Succeeded = status.Succeeded
+	task.Status.Failed = status.Failed
+
+	if len(status.Conditions) == 0 {
+		// conditions is empty means the job is not done
+		task.Status.Condition = nil
+	} else {
+		// job is already done, update status and run callback function
+		c0 := status.Conditions[0]
+		task.Status.Condition = &TaskCondition{
+			Type:               TaskConditionType(c0.Type),
+			Status:             ConditionStatus(c0.Status),
+			LastProbeTime:      c0.LastProbeTime,
+			LastTransitionTime: c0.LastTransitionTime,
+			Reason:             c0.Reason,
+			Message:            c0.Message,
+		}
+	}
+
 	return task, nil
 }

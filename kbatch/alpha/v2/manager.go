@@ -1,18 +1,23 @@
 package v2
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/linlanniao/k8sutils"
 	"github.com/linlanniao/k8sutils/controller"
 	"github.com/linlanniao/k8sutils/validate"
+	"golang.org/x/sync/errgroup"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 )
 
@@ -381,45 +386,21 @@ func (m *manager) onJobAddedUpdated(key string, job *batchv1.Job) error {
 		defer cancel()
 
 		// update tracking job
-		err := m.jobTracker.store(job)
-		if err != nil {
+		if err := m.jobTracker.store(job); err != nil {
 			return err
 		}
 
 		// update task status with the new job
-		task, err := ParseTaskFromJob(job)
+		task, err := Job2Task(job)
 		if err != nil {
 			return err
 		}
-		status := job.Status
 
-		task.Status.Job = job
-		task.Status.IsJobApplied = true
-		task.Status.Active = status.Active
-		task.Status.Succeeded = status.Succeeded
-		task.Status.Failed = status.Failed
+		// status update callback
+		m.iTaskService.OnStatusUpdate(ctx, task)
 
-		if len(status.Conditions) == 0 {
-			// conditions is empty means the job is not done
-			task.Status.Condition = nil
-			m.iTaskService.OnStatusUpdate(ctx, task)
-
-			return nil
-
-		} else {
-			// job is already done, update status and run callback function
-			c0 := status.Conditions[0]
-			task.Status.Condition = &TaskCondition{
-				Type:               TaskConditionType(c0.Type),
-				Status:             ConditionStatus(c0.Status),
-				LastProbeTime:      c0.LastProbeTime,
-				LastTransitionTime: c0.LastTransitionTime,
-				Reason:             c0.Reason,
-				Message:            c0.Message,
-			}
-
-			// callback
-			m.iTaskService.OnStatusUpdate(ctx, task)
+		if task.Status.Condition != nil {
+			// Condition is not nil represents task has been completed.
 
 			switch task.Status.Condition.Type {
 			case TaskComplete:
@@ -431,6 +412,8 @@ func (m *manager) onJobAddedUpdated(key string, job *batchv1.Job) error {
 			// delete tracking job
 			return m.jobTracker.delete(job)
 		}
+
+		return nil
 	}
 
 	err := do(job)
@@ -461,10 +444,13 @@ func (m *manager) onJobDeleted(key string) error {
 	return nil
 }
 
+const EndOfPodLine = "---------- END OF TASK-RUN ----------\n"
+
 func (m *manager) onPodAddedUpdated(key string, pod *corev1.Pod) error {
 	// Try to get oldPod from PodTracker, compare the status of oldPod and newPod.
 	// If the status is consistent, skip the subsequent operation.
-	if oldPod, err := m.podTracker.load(key); oldPod != nil && err == nil {
+	oldPod, err := m.podTracker.load(key)
+	if oldPod != nil && err == nil {
 		older := oldPod.Status
 		newer := pod.Status
 
@@ -473,16 +459,116 @@ func (m *manager) onPodAddedUpdated(key string, pod *corev1.Pod) error {
 		}
 	}
 
-	do := func(pod *corev1.Pod) {
+	do := func(older, newer *corev1.Pod) error {
 		// context
+		ctx, cancel := context.WithTimeout(context.Background(), callBackMaxRuntime)
+		defer cancel()
 
-		// update tracking pod
+		// update tracker
+		if err := m.podTracker.store(newer); err != nil {
+			return err
+		}
 
-		// parse taskRun from pod
+		// parse taskRun from newer
+		taskRun, err := Pod2TaskRun(newer)
+		if err != nil {
+			return err
+		}
+
+		// status update callback
+		m.iTaskRunService.OnStatusUpdate(ctx, taskRun)
+
+		// 处理日志, 只处理Running/Succeeded/Failed状态的pod, 其他状态的pod不处理日志
+		initBufSize := 100 // 300 lines buffer
+		tickerDuration := 10 * time.Second
+		logCh := make(chan LogLine, initBufSize)
+		g, ctx := errgroup.WithContext(ctx)
+
+		switch taskRun.Status.Phase {
+		case TaskRunRunning:
+			g.Go(func() error {
+				klog.Infof("Pod %s is running, start tracking logs (tail logs)", newer.GetName())
+				return m.getOrTailLogs(ctx, newer.GetNamespace(), newer.GetName(), logCh, true)
+			})
+
+		case TaskRunFailed, TaskRunSucceeded:
+			if older != nil && older.Status.Phase == corev1.PodRunning {
+				// If it changes from Running state to Succeed/Failed state, the log will not be processed.
+				close(logCh)
+				return nil
+			}
+
+			g.Go(func() error {
+				klog.Infof("Pod %s is over, start to refresh the logs in full (get logs)", newer.GetName())
+				m.iTaskRunService.CleanAllLogs(ctx, taskRun) // Delete the old log first.
+				return m.getOrTailLogs(ctx, newer.GetNamespace(), newer.GetName(), logCh, false)
+			})
+
+		default:
+			// Pods in other states do not handle logs.
+			close(logCh)
+			return nil
+		}
+
+		// 处理日志的goroutine
+		g.Go(func() error {
+			ticker := time.NewTicker(tickerDuration)
+			lines := make(LogLines, 0, initBufSize)
+			doFlush := func(isEof bool) error { // flush日志
+				if len(lines) == 0 && !isEof {
+					return nil
+				}
+				logs := make(LogLines, len(lines))
+				copy(logs, lines)
+				if isEof {
+					logs = append(logs, &LogLine{
+						Timestamp: metav1.Now(),
+						Message:   EndOfPodLine,
+					})
+				}
+				lines = lines[:0]
+				m.iTaskRunService.OnLogs(ctx, taskRun, logs)
+				return nil
+			}
+			for {
+				select {
+				case line, ok := <-logCh: // Read the log from logCh
+
+					if !ok {
+						// logCh off, flush log
+						ticker.Stop()
+						if err := doFlush(true); err != nil {
+							return err
+						}
+						return nil
+					}
+
+					if len(lines) >= initBufSize { // If the length of the line exceeds initBufSize, the flush log
+						if err := doFlush(false); err != nil {
+							return err
+						}
+						ticker.Reset(tickerDuration)
+					}
+					lines = append(lines, &line)
+
+				case <-ticker.C: // Ticker timer trigger, flush log
+					if err := doFlush(false); err != nil {
+						return err
+					}
+				}
+			}
+		})
+		return g.Wait()
 
 	}
-	_ = do // TODO
-	panic("notImplemented")
+
+	err = do(oldPod, pod)
+	if err != nil {
+		klog.Errorf("onPodAddedUpdated, key=%s, err=%v", key, err)
+		return err
+	}
+	klog.Infof("onPodAddedUpdated, key=%s", key)
+	return nil
 }
 
 func (m *manager) onPodDeleted(key string) error {
@@ -493,4 +579,36 @@ func (m *manager) onPodDeleted(key string) error {
 
 	klog.Infof("onPodDeleted, key=%s", key)
 	return nil
+}
+
+func (m *manager) getOrTailLogs(ctx context.Context, namespace, podName string, logsCh chan<- LogLine, tail bool) error {
+	defer close(logsCh)
+	logOptions := &corev1.PodLogOptions{
+		Timestamps: true,
+		Follow:     tail, // log tail
+	}
+	req := m.clientset.GetClientSet().CoreV1().Pods(namespace).GetLogs(podName, logOptions)
+	logStream, err := req.Stream(ctx)
+	if err != nil {
+		return err
+	}
+	defer func(logStream io.ReadCloser) {
+		_ = logStream.Close()
+	}(logStream)
+	reader := bufio.NewReader(logStream)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return err
+		}
+		lst := strings.SplitN(line, " ", 2)
+		timestamp, _ := time.Parse(time.RFC3339Nano, lst[0])
+		logsCh <- LogLine{
+			Timestamp: metav1.NewTime(timestamp),
+			Message:   lst[1],
+		}
+	}
 }
